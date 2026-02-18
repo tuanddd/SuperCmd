@@ -353,6 +353,65 @@ export function renderPhosphorIconDataUrl(
   return `data:image/svg+xml;base64,${base64}`;
 }
 
+const nativeIconDataUrlCache = new Map<string, Promise<string | undefined>>();
+
+function svgDataUrlToPngDataUrl(svgDataUrl: string, size: number): Promise<string | undefined> {
+  if (typeof window === 'undefined' || typeof Image === 'undefined' || typeof document === 'undefined') {
+    return Promise.resolve(svgDataUrl);
+  }
+
+  return new Promise((resolve) => {
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve(svgDataUrl);
+        return;
+      }
+
+      const img = new Image();
+      img.onload = () => {
+        try {
+          ctx.clearRect(0, 0, size, size);
+          ctx.drawImage(img, 0, 0, size, size);
+          const pngDataUrl = canvas.toDataURL('image/png');
+          resolve(pngDataUrl || svgDataUrl);
+        } catch {
+          resolve(svgDataUrl);
+        }
+      };
+      img.onerror = () => resolve(svgDataUrl);
+      img.src = svgDataUrl;
+    } catch {
+      resolve(svgDataUrl);
+    }
+  });
+}
+
+export function renderPhosphorIconDataUrlForNative(
+  input: string,
+  options?: { size?: number; color?: string; weight?: PhosphorIconWeight }
+): Promise<string | undefined> {
+  const size = Number.isFinite(Number(options?.size)) ? Math.max(8, Number(options?.size)) : 16;
+  const color = String(options?.color || '#000000');
+  const weight = options?.weight || 'regular';
+  const cacheKey = `${input}::${size}::${color}::${weight}`;
+  const cached = nativeIconDataUrlCache.get(cacheKey);
+  if (cached) return cached;
+
+  const promise = (async () => {
+    const svgDataUrl = renderPhosphorIconDataUrl(input, { size, color, weight: options?.weight });
+    if (!svgDataUrl) return undefined;
+    if (!svgDataUrl.startsWith('data:image/svg+xml')) return svgDataUrl;
+    return svgDataUrlToPngDataUrl(svgDataUrl, size);
+  })();
+
+  nativeIconDataUrlCache.set(cacheKey, promise);
+  return promise;
+}
+
 export function isRaycastIconName(name: string): boolean {
   return raycastIconNameSet.has(name);
 }

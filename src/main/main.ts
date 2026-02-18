@@ -8044,7 +8044,7 @@ return appURL's |path|() as text`,
 
   // Update / create a menu-bar Tray when the renderer sends menu structure
   ipcMain.on('menubar-update', (_event: any, data: any) => {
-    const { extId, iconPath, iconDataUrl, iconEmoji, title, tooltip, items } = data;
+    const { extId, iconPath, iconDataUrl, iconEmoji, iconTemplate, fallbackIconDataUrl, title, tooltip, items } = data;
 
     let tray = menuBarTrays.get(extId);
 
@@ -8058,13 +8058,11 @@ return appURL's |path|() as text`,
           image = nativeImage.createFromDataURL(dataUrlValue);
         } else {
           if (!pathValue || !fs.existsSync(pathValue)) return null;
-          const isSvg = /\.svg$/i.test(pathValue);
-          if (isSvg) {
+          image = nativeImage.createFromPath(pathValue);
+          if ((!image || image.isEmpty()) && /\.svg$/i.test(pathValue)) {
             const svg = fs.readFileSync(pathValue, 'utf8');
             const svgDataUrl = `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
             image = nativeImage.createFromDataURL(svgDataUrl);
-          } else {
-            image = nativeImage.createFromPath(pathValue);
           }
         }
         if (!image || image.isEmpty()) return null;
@@ -8076,7 +8074,11 @@ return appURL's |path|() as text`,
 
     let lastResolvedTrayIconOk = false;
     const resolveTrayIcon = () => {
-      const img = createNativeImageFromMenuIcon({ pathValue: iconPath, dataUrlValue: iconDataUrl }, 18);
+      const primaryImg = createNativeImageFromMenuIcon({ pathValue: iconPath, dataUrlValue: iconDataUrl }, 18);
+      const usingPrimary = Boolean(primaryImg);
+      const img =
+        primaryImg ||
+        createNativeImageFromMenuIcon({ dataUrlValue: fallbackIconDataUrl }, 18);
       lastResolvedTrayIconOk = Boolean(img);
       if (img) {
         // Raycast icon tokens are serialized as data URLs and should be template images
@@ -8085,8 +8087,16 @@ return appURL's |path|() as text`,
         // Keep template rendering for bitmap assets (classic menubar style).
         // For SVG asset paths, preserve source appearance (e.g., explicit light/dark icon variants).
         const isSvg = /\.svg$/i.test(iconPath || '');
+        const shouldTemplate =
+          !usingPrimary
+            ? false
+            : (
+                typeof iconTemplate === 'boolean'
+                  ? iconTemplate
+                  : (isGeneratedDataUrl ? true : !isSvg)
+              );
         try {
-          img.setTemplateImage(isGeneratedDataUrl ? true : !isSvg);
+          img.setTemplateImage(shouldTemplate);
         } catch {}
         return img;
       }
@@ -8137,6 +8147,7 @@ return appURL's |path|() as text`,
     const resolveMenuItemIcon = (item: any) => {
       const iconDataUrl = typeof item?.iconDataUrl === 'string' ? item.iconDataUrl.trim() : '';
       const iconPath = typeof item?.iconPath === 'string' ? item.iconPath : '';
+      const explicitTemplate = typeof item?.iconTemplate === 'boolean' ? item.iconTemplate : undefined;
       try {
         let img: any;
         if (iconDataUrl.startsWith('data:')) {
@@ -8145,18 +8156,18 @@ return appURL's |path|() as text`,
           if (!iconPath) return undefined;
           const fs = require('fs');
           if (!fs.existsSync(iconPath)) return undefined;
-          const isSvg = /\.svg$/i.test(iconPath);
-          if (isSvg) {
+          img = nativeImage.createFromPath(iconPath);
+          if ((!img || img.isEmpty()) && /\.svg$/i.test(iconPath)) {
             const svg = fs.readFileSync(iconPath, 'utf8');
             const svgDataUrl = `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
             img = nativeImage.createFromDataURL(svgDataUrl);
-          } else {
-            img = nativeImage.createFromPath(iconPath);
           }
         }
         if (!img || img.isEmpty()) return undefined;
+        const shouldTemplate =
+          explicitTemplate ?? (iconDataUrl.startsWith('data:image/svg+xml') ? true : false);
         try {
-          img.setTemplateImage(false);
+          img.setTemplateImage(shouldTemplate);
         } catch {}
         return img.resize({ width: 16, height: 16 });
       } catch {}
