@@ -10,7 +10,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 export interface AISettings {
-  provider: 'openai' | 'anthropic' | 'ollama';
+  provider: 'openai' | 'anthropic' | 'ollama' | 'openai-compatible';
   openaiApiKey: string;
   anthropicApiKey: string;
   elevenlabsApiKey: string;
@@ -27,6 +27,9 @@ export interface AISettings {
   edgeTtsVoice: string;
   speechCorrectionEnabled: boolean;
   enabled: boolean;
+  openaiCompatibleBaseUrl: string;
+  openaiCompatibleApiKey: string;
+  openaiCompatibleModel: string;
 }
 
 export interface AppSettings {
@@ -63,6 +66,9 @@ const DEFAULT_AI_SETTINGS: AISettings = {
   edgeTtsVoice: 'en-US-EricNeural',
   speechCorrectionEnabled: true,
   enabled: true,
+  openaiCompatibleBaseUrl: '',
+  openaiCompatibleApiKey: '',
+  openaiCompatibleModel: '',
 };
 
 const DEFAULT_SETTINGS: AppSettings = {

@@ -95,7 +95,7 @@ export interface ExtensionBundle {
 }
 
 export interface AISettings {
-  provider: 'openai' | 'anthropic' | 'ollama';
+  provider: 'openai' | 'anthropic' | 'ollama' | 'openai-compatible';
   openaiApiKey: string;
   anthropicApiKey: string;
   elevenlabsApiKey: string;
@@ -112,6 +112,9 @@ export interface AISettings {
   edgeTtsVoice: string;
   speechCorrectionEnabled: boolean;
   enabled: boolean;
+  openaiCompatibleBaseUrl: string;
+  openaiCompatibleApiKey: string;
+  openaiCompatibleModel: string;
 }
 
 export interface EdgeTtsVoice {

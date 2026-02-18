@@ -19,7 +19,7 @@ export interface AIRequestOptions {
 // ─── Model routing ────────────────────────────────────────────────────
 
 interface ModelRoute {
-  provider: 'openai' | 'anthropic' | 'ollama';
+  provider: 'openai' | 'anthropic' | 'ollama' | 'openai-compatible';
   modelId: string;
 }
 
@@ -48,10 +48,10 @@ function resolveModel(model: string | undefined, config: AISettings): ModelRoute
   }
   // If the model key is not in our routing table, strip provider prefix and route directly
   if (model) {
-    const prefixes = ['openai-', 'anthropic-', 'ollama-'] as const;
+    const prefixes = ['openai-', 'anthropic-', 'ollama-', 'openai-compatible-'] as const;
     for (const prefix of prefixes) {
       if (model.startsWith(prefix)) {
-        return { provider: prefix.slice(0, -1) as 'openai' | 'anthropic' | 'ollama', modelId: model.slice(prefix.length) };
+        return { provider: prefix.slice(0, -1) as 'openai' | 'anthropic' | 'ollama' | 'openai-compatible', modelId: model.slice(prefix.length) };
       }
     }
     return { provider: config.provider, modelId: model };
@@ -62,10 +62,10 @@ function resolveModel(model: string | undefined, config: AISettings): ModelRoute
       return MODEL_ROUTES[config.defaultModel];
     }
     // Handle dynamic model IDs (e.g. "ollama-llama3.2")
-    const prefixes = ['openai-', 'anthropic-', 'ollama-'] as const;
+    const prefixes = ['openai-', 'anthropic-', 'ollama-', 'openai-compatible-'] as const;
     for (const prefix of prefixes) {
       if (config.defaultModel.startsWith(prefix)) {
-        return { provider: prefix.slice(0, -1) as 'openai' | 'anthropic' | 'ollama', modelId: config.defaultModel.slice(prefix.length) };
+        return { provider: prefix.slice(0, -1) as 'openai' | 'anthropic' | 'ollama' | 'openai-compatible', modelId: config.defaultModel.slice(prefix.length) };
       }
     }
   }
@@ -74,6 +74,7 @@ function resolveModel(model: string | undefined, config: AISettings): ModelRoute
     openai: 'gpt-4o-mini',
     anthropic: 'claude-haiku-4-5-20251001',
     ollama: 'llama3',
+    'openai-compatible': config.openaiCompatibleModel || 'gpt-4o',
   };
   return { provider: config.provider, modelId: defaults[config.provider] || 'gpt-4o-mini' };
 }
@@ -86,6 +87,7 @@ export function isAIAvailable(config: AISettings): boolean {
     case 'openai': return !!config.openaiApiKey;
     case 'anthropic': return !!config.anthropicApiKey;
     case 'ollama': return !!config.ollamaBaseUrl;
+    case 'openai-compatible': return !!(config.openaiCompatibleBaseUrl && config.openaiCompatibleApiKey);
     default: return false;
   }
 }
@@ -108,6 +110,17 @@ export async function* streamAI(
       break;
     case 'ollama':
       yield* streamOllama(config.ollamaBaseUrl, route.modelId, options.prompt, temperature, options.systemPrompt, options.signal);
+      break;
+    case 'openai-compatible':
+      yield* streamOpenAICompatible(
+        config.openaiCompatibleBaseUrl,
+        config.openaiCompatibleApiKey,
+        route.modelId,
+        options.prompt,
+        temperature,
+        options.systemPrompt,
+        options.signal
+      );
       break;
   }
 }
@@ -144,6 +157,56 @@ async function* streamOpenAI(
     body,
     signal,
     useHttps: true,
+  });
+
+  yield* parseSSE(response, (data) => {
+    if (data === '[DONE]') return null;
+    try {
+      const parsed = JSON.parse(data);
+      return parsed.choices?.[0]?.delta?.content || null;
+    } catch {
+      return null;
+    }
+  });
+}
+
+// ─── OpenAI-Compatible (Generic) ──────────────────────────────────────
+
+async function* streamOpenAICompatible(
+  baseUrl: string,
+  apiKey: string,
+  model: string,
+  prompt: string,
+  temperature: number,
+  systemPrompt?: string,
+  signal?: AbortSignal
+): AsyncGenerator<string> {
+  const messages: any[] = [];
+  if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
+  messages.push({ role: 'user', content: prompt });
+
+  const body = JSON.stringify({
+    model,
+    messages,
+    temperature,
+    stream: true,
+  });
+
+  const url = new URL('/v1/chat/completions', baseUrl);
+  const useHttps = url.protocol === 'https:';
+
+  const response = await httpRequest({
+    hostname: url.hostname,
+    port: url.port ? parseInt(url.port) : undefined,
+    path: url.pathname,
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body,
+    signal,
+    useHttps,
   });
 
   yield* parseSSE(response, (data) => {
