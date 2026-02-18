@@ -74,7 +74,7 @@ function resolveModel(model: string | undefined, config: AISettings): ModelRoute
     openai: 'gpt-4o-mini',
     anthropic: 'claude-haiku-4-5-20251001',
     ollama: 'llama3',
-    'openai-compatible': config.openaiCompatibleModel || 'gpt-4o',
+    'openai-compatible': config.openaiCompatibleModel?.trim() || 'gpt-4o',
   };
   return { provider: config.provider, modelId: defaults[config.provider] || 'gpt-4o-mini' };
 }
@@ -99,6 +99,14 @@ export async function* streamAI(
   options: AIRequestOptions
 ): AsyncGenerator<string> {
   const route = resolveModel(options.model, config);
+  console.log('[AI] Resolved route:', { 
+    requestedModel: options.model, 
+    provider: route.provider, 
+    modelId: route.modelId,
+    configProvider: config.provider,
+    configDefaultModel: config.defaultModel,
+    configOpenaiCompatibleModel: config.openaiCompatibleModel
+  });
   const temperature = options.creativity ?? 0.7;
 
   switch (route.provider) {
