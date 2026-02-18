@@ -179,6 +179,50 @@ export function useSpeakManager({
     };
   }, [configuredTtsModel]);
 
+  // Sync configured voice from settings whenever they change
+  useEffect(() => {
+    let disposed = false;
+    const syncFromSettings = async () => {
+      try {
+        const settings = await window.electron.getSettings();
+        if (disposed) return;
+        
+        const ttsModel = String(settings.ai?.textToSpeechModel || 'edge-tts');
+        const edgeVoice = String(settings.ai?.edgeTtsVoice || 'en-US-EricNeural');
+        
+        setConfiguredTtsModel(ttsModel);
+        setConfiguredEdgeTtsVoice(edgeVoice);
+        
+        // Also sync speakOptions to match settings
+        const usingElevenLabs = ttsModel.startsWith('elevenlabs-');
+        const targetVoice = usingElevenLabs
+          ? parseElevenLabsSpeakModel(ttsModel).voiceId
+          : edgeVoice;
+        
+        if (targetVoice && targetVoice !== speakOptions.voice) {
+          const next = await window.electron.speakUpdateOptions({
+            voice: targetVoice,
+            restartCurrent: false,
+          });
+          setSpeakOptions(next);
+        }
+      } catch {
+        // Ignore errors
+      }
+    };
+    
+    // Initial sync
+    syncFromSettings();
+    
+    // Poll for settings changes every 2 seconds while widget is relevant
+    const interval = setInterval(syncFromSettings, 2000);
+    
+    return () => {
+      disposed = true;
+      clearInterval(interval);
+    };
+  }, []);
+
   // Auto-sync configured voice when speak view opens
   useEffect(() => {
     if (!showSpeak) {
