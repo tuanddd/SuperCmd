@@ -436,6 +436,24 @@ let _clearSearchBarCallback: (() => void) | null = null;
 
 export function clearSearchBar(options?: { forceScrollToTop?: boolean }): Promise<void> {
   _clearSearchBarCallback?.();
+  try {
+    const candidates = Array.from(
+      document.querySelectorAll<HTMLInputElement>('input[data-supercmd-search-input="true"]')
+    );
+    const visible = candidates.find((input) => {
+      if (!input || input.disabled) return false;
+      return input.getClientRects().length > 0;
+    });
+    const target = visible || candidates[0] || null;
+    if (target && target.value !== '') {
+      const descriptor = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        'value'
+      );
+      descriptor?.set?.call(target, '');
+      target.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  } catch {}
   return Promise.resolve();
 }
 

@@ -111,7 +111,7 @@ export function createListRuntime(deps: ListRuntimeDeps) {
       setSelectedIdx(0);
       if (!onSearchTextChange) return;
       if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
-      if (throttle !== false) searchDebounceRef.current = setTimeout(() => onSearchTextChange(value), 300);
+      if (throttle === true) searchDebounceRef.current = setTimeout(() => onSearchTextChange(value), 300);
       else onSearchTextChange(value);
     }, [onSearchTextChange, throttle]);
 
@@ -264,7 +264,7 @@ export function createListRuntime(deps: ListRuntimeDeps) {
         <div className="flex flex-col h-full" onKeyDown={handleKeyDown}>
           <div className="flex items-center gap-2 px-4 py-3 border-b border-white/[0.06]">
             <button onClick={pop} className="text-white/30 hover:text-white/60 transition-colors flex-shrink-0 p-0.5"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 12H5M12 19l-7-7 7-7" /></svg></button>
-            <input ref={inputRef} type="text" placeholder={searchBarPlaceholder || 'Search…'} value={searchText} onChange={(event) => handleSearchChange(event.target.value)} className="flex-1 bg-transparent border-none outline-none text-white/90 placeholder-white/30 text-[14px] font-light" autoFocus />
+            <input ref={inputRef} data-supercmd-search-input="true" type="text" placeholder={searchBarPlaceholder || 'Search…'} value={searchText} onChange={(event) => handleSearchChange(event.target.value)} className="flex-1 bg-transparent border-none outline-none text-white/90 placeholder-white/30 text-[14px] font-light" autoFocus />
             {searchBarAccessory && <div className="flex-shrink-0">{searchBarAccessory}</div>}
           </div>
 
