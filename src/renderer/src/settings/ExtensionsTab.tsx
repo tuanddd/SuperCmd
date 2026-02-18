@@ -77,7 +77,8 @@ const normalizeMatchKey = (value: string): string =>
 
 const SUPERCMD_EXTENSION_NAME = '__supercmd';
 const SCRIPT_COMMANDS_EXTENSION_NAME = '__script_commands';
-const SYSTEM_EXTENSIONS_NAME = '__system_extensions';
+const INSTALLED_APPLICATIONS_NAME = '__installed_applications';
+const SYSTEM_SETTINGS_NAME = '__system_settings';
 
 const ExtensionsTab: React.FC<{
   focusTarget?: SettingsFocusTarget | null;
@@ -149,8 +150,12 @@ const ExtensionsTab: React.FC<{
         map.set(`${SUPERCMD_EXTENSION_NAME}/${cmd.id}`, cmd);
         continue;
       }
-      if (cmd.category === 'app' || cmd.category === 'settings') {
-        map.set(`${SYSTEM_EXTENSIONS_NAME}/${cmd.id}`, cmd);
+      if (cmd.category === 'app') {
+        map.set(`${INSTALLED_APPLICATIONS_NAME}/${cmd.id}`, cmd);
+        continue;
+      }
+      if (cmd.category === 'settings') {
+        map.set(`${SYSTEM_SETTINGS_NAME}/${cmd.id}`, cmd);
       }
     }
     return map;
@@ -253,23 +258,46 @@ const ExtensionsTab: React.FC<{
       });
     }
 
-    const systemExtensions = commands
-      .filter((cmd) => cmd.category === 'app' || cmd.category === 'settings')
+    const installedApplications = commands
+      .filter((cmd) => cmd.category === 'app')
       .sort((a, b) => a.title.localeCompare(b.title));
-    if (systemExtensions.length > 0) {
-      const finderIcon = systemExtensions.find((cmd) => cmd.title.toLowerCase() === 'finder')?.iconDataUrl;
-      const fallbackIcon = systemExtensions.find((cmd) => Boolean(cmd.iconDataUrl))?.iconDataUrl;
-      byExt.set(SYSTEM_EXTENSIONS_NAME, {
-        extName: SYSTEM_EXTENSIONS_NAME,
-        title: 'System Extensions',
-        description: 'macOS apps and settings with launch/hotkey support (for example Finder).',
+    if (installedApplications.length > 0) {
+      const finderIcon = installedApplications.find((cmd) => cmd.title.toLowerCase() === 'finder')?.iconDataUrl;
+      const fallbackIcon = installedApplications.find((cmd) => Boolean(cmd.iconDataUrl))?.iconDataUrl;
+      byExt.set(INSTALLED_APPLICATIONS_NAME, {
+        extName: INSTALLED_APPLICATIONS_NAME,
+        title: 'Applications',
+        description: 'Installed macOS applications with launch and hotkey support.',
         owner: 'supercmd',
         iconDataUrl: finderIcon || fallbackIcon,
         preferences: [],
-        commands: systemExtensions.map((cmd) => ({
+        commands: installedApplications.map((cmd) => ({
           name: cmd.id,
           title: cmd.title,
-          description: cmd.subtitle || (cmd.category === 'settings' ? 'System Settings pane' : 'Application'),
+          description: cmd.subtitle || 'Application',
+          mode: 'no-view',
+          interval: cmd.interval,
+          disabledByDefault: Boolean(cmd.disabledByDefault),
+          preferences: [],
+        })),
+      });
+    }
+
+    const systemSettingsCommands = commands
+      .filter((cmd) => cmd.category === 'settings')
+      .sort((a, b) => a.title.localeCompare(b.title));
+    if (systemSettingsCommands.length > 0) {
+      byExt.set(SYSTEM_SETTINGS_NAME, {
+        extName: SYSTEM_SETTINGS_NAME,
+        title: 'System Settings',
+        description: 'macOS settings panes with launch and hotkey support.',
+        owner: 'supercmd',
+        iconDataUrl: systemSettingsCommands.find((cmd) => Boolean(cmd.iconDataUrl))?.iconDataUrl,
+        preferences: [],
+        commands: systemSettingsCommands.map((cmd) => ({
+          name: cmd.id,
+          title: cmd.title,
+          description: cmd.subtitle || 'System Settings pane',
           mode: 'no-view',
           interval: cmd.interval,
           disabledByDefault: Boolean(cmd.disabledByDefault),
@@ -281,8 +309,10 @@ const ExtensionsTab: React.FC<{
     return Array.from(byExt.values()).sort((a, b) => {
       if (a.extName === SUPERCMD_EXTENSION_NAME) return -1;
       if (b.extName === SUPERCMD_EXTENSION_NAME) return 1;
-      if (a.extName === SYSTEM_EXTENSIONS_NAME) return -1;
-      if (b.extName === SYSTEM_EXTENSIONS_NAME) return 1;
+      if (a.extName === INSTALLED_APPLICATIONS_NAME) return -1;
+      if (b.extName === INSTALLED_APPLICATIONS_NAME) return 1;
+      if (a.extName === SYSTEM_SETTINGS_NAME) return -1;
+      if (b.extName === SYSTEM_SETTINGS_NAME) return 1;
       if (a.extName === SCRIPT_COMMANDS_EXTENSION_NAME) return -1;
       if (b.extName === SCRIPT_COMMANDS_EXTENSION_NAME) return 1;
       return a.title.localeCompare(b.title);
@@ -367,7 +397,10 @@ const ExtensionsTab: React.FC<{
       const next = { ...prev };
       for (const schema of displaySchemas) {
         if (next[schema.extName] === undefined) {
-          next[schema.extName] = schema.extName === SYSTEM_EXTENSIONS_NAME ? false : true;
+          next[schema.extName] =
+            schema.extName === INSTALLED_APPLICATIONS_NAME || schema.extName === SYSTEM_SETTINGS_NAME
+              ? false
+              : true;
         }
       }
       return next;
@@ -502,7 +535,8 @@ const ExtensionsTab: React.FC<{
 
   const getSchemaTypeLabel = (extName: string): string => {
     if (extName === SUPERCMD_EXTENSION_NAME) return 'Built-in';
-    if (extName === SYSTEM_EXTENSIONS_NAME) return 'System';
+    if (extName === INSTALLED_APPLICATIONS_NAME) return 'Apps';
+    if (extName === SYSTEM_SETTINGS_NAME) return 'Settings';
     if (extName === SCRIPT_COMMANDS_EXTENSION_NAME) return 'Scripts';
     return 'Extension';
   };
@@ -779,8 +813,10 @@ const ExtensionsTab: React.FC<{
                         <img src={schema.iconDataUrl || extensionIconFallbackByName.get(schema.extName)} alt="" className="w-4 h-4 rounded-sm object-contain" draggable={false} />
                       ) : schema.extName === SUPERCMD_EXTENSION_NAME ? (
                         <img src={supercmdLogo} alt="" className="w-4 h-4 object-contain" draggable={false} />
-                      ) : schema.extName === SYSTEM_EXTENSIONS_NAME ? (
+                      ) : schema.extName === SYSTEM_SETTINGS_NAME ? (
                         <Settings className="w-4 h-4 text-white/65 flex-shrink-0" />
+                      ) : schema.extName === INSTALLED_APPLICATIONS_NAME ? (
+                        <TerminalSquare className="w-4 h-4 text-white/60 flex-shrink-0" />
                       ) : schema.extName === SCRIPT_COMMANDS_EXTENSION_NAME ? (
                         <TerminalSquare className="w-4 h-4 text-white/60 flex-shrink-0" />
                       ) : (
@@ -823,7 +859,7 @@ const ExtensionsTab: React.FC<{
                               <img src={commandInfo.iconDataUrl} alt="" className="w-3.5 h-3.5 rounded-sm object-contain flex-shrink-0" draggable={false} />
                             ) : schema.extName === SUPERCMD_EXTENSION_NAME ? (
                               getCoreCommandIcon(commandInfo?.id)
-                            ) : schema.extName === SYSTEM_EXTENSIONS_NAME ? (
+                            ) : schema.extName === INSTALLED_APPLICATIONS_NAME || schema.extName === SYSTEM_SETTINGS_NAME ? (
                               getSystemExtensionCommandIcon(commandInfo)
                             ) : (
                               <TerminalSquare className="w-3.5 h-3.5 text-white/45 flex-shrink-0" />
@@ -919,8 +955,10 @@ const ExtensionsTab: React.FC<{
                     <img src={selectedSchema.iconDataUrl} alt="" className="w-5 h-5 rounded object-contain" draggable={false} />
                   ) : selectedSchema.extName === SUPERCMD_EXTENSION_NAME ? (
                     <img src={supercmdLogo} alt="" className="w-5 h-5 object-contain" draggable={false} />
-                  ) : selectedSchema.extName === SYSTEM_EXTENSIONS_NAME ? (
+                  ) : selectedSchema.extName === SYSTEM_SETTINGS_NAME ? (
                     <Settings className="w-5 h-5 text-white/65" />
+                  ) : selectedSchema.extName === INSTALLED_APPLICATIONS_NAME ? (
+                    <TerminalSquare className="w-5 h-5 text-white/60" />
                   ) : selectedSchema.extName === SCRIPT_COMMANDS_EXTENSION_NAME ? (
                     <TerminalSquare className="w-5 h-5 text-white/60" />
                   ) : (
