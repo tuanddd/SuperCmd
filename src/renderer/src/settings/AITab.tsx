@@ -27,6 +27,7 @@ const PROVIDER_OPTIONS = [
   { id: 'openai' as const, label: 'OpenAI', description: 'GPT family models' },
   { id: 'anthropic' as const, label: 'Claude', description: 'Anthropic Claude models' },
   { id: 'ollama' as const, label: 'Ollama', description: 'Local models' },
+  { id: 'openai-compatible' as const, label: 'Custom (OpenAI-compatible)', description: 'Any OpenAI-compatible API (OpenRouter, Together, etc.)' },
 ];
 
 const MODELS_BY_PROVIDER: Record<string, { id: string; label: string }[]> = {
@@ -166,6 +167,7 @@ const AITab: React.FC = () => {
   const [showAnthropicKey, setShowAnthropicKey] = useState(false);
   const [showElevenLabsKey, setShowElevenLabsKey] = useState(false);
   const [showSupermemoryKey, setShowSupermemoryKey] = useState(false);
+  const [showOpenAICompatibleKey, setShowOpenAICompatibleKey] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved'>('idle');
   const [hotkeyStatus, setHotkeyStatus] = useState<{
     type: 'idle' | 'success' | 'error';
@@ -374,7 +376,12 @@ const AITab: React.FC = () => {
         id: `ollama-${name}`,
         label: CURATED_OLLAMA_MODELS.find((m) => m.name === name)?.label || name,
       }))
-    : MODELS_BY_PROVIDER[ai.provider] || [];
+    : ai.provider === 'openai-compatible' && ai.openaiCompatibleModel
+      ? [{
+          id: `openai-compatible-${ai.openaiCompatibleModel}`,
+          label: ai.openaiCompatibleModel,
+        }]
+      : MODELS_BY_PROVIDER[ai.provider] || [];
 
   const whisperModelValue = (!ai.speechToTextModel || ai.speechToTextModel === 'default')
     ? 'native'
@@ -616,7 +623,7 @@ const AITab: React.FC = () => {
 
                 <div>
                   <label className="text-[11px] text-white/45 mb-1 block">Provider</label>
-                  <div className="grid grid-cols-3 gap-1.5">
+                  <div className="grid grid-cols-2 gap-2">
                     {PROVIDER_OPTIONS.map((p) => (
                       <button
                         key={p.id}
@@ -624,6 +631,11 @@ const AITab: React.FC = () => {
                           if (p.id === 'ollama') {
                             const firstInstalled = Array.from(localModels)[0];
                             const nextDefault = firstInstalled ? `ollama-${firstInstalled}` : '';
+                            updateAI({ provider: p.id, defaultModel: nextDefault });
+                            return;
+                          }
+                          if (p.id === 'openai-compatible') {
+                            const nextDefault = ai.openaiCompatibleModel ? `openai-compatible-${ai.openaiCompatibleModel}` : '';
                             updateAI({ provider: p.id, defaultModel: nextDefault });
                             return;
                           }
@@ -652,6 +664,59 @@ const AITab: React.FC = () => {
                       placeholder="http://localhost:11434"
                       className="w-full bg-white/[0.04] border border-white/[0.08] rounded-md px-2.5 py-2 text-sm text-white/90 placeholder-white/30 focus:outline-none focus:border-blue-500/50"
                     />
+                  </div>
+                )}
+
+                {ai.provider === 'openai-compatible' && (
+                  <div className="space-y-3">
+                    <div>
+                      <label className="text-[11px] text-white/45 mb-1 block">Base URL</label>
+                      <input
+                        type="text"
+                        value={ai.openaiCompatibleBaseUrl}
+                        onChange={(e) => updateAI({ openaiCompatibleBaseUrl: e.target.value.trim() })}
+                        placeholder="https://api.openrouter.ai/v1"
+                        className="w-full bg-white/[0.04] border border-white/[0.08] rounded-md px-2.5 py-2 text-sm text-white/90 placeholder-white/30 focus:outline-none focus:border-blue-500/50"
+                      />
+                      <p className="text-[10px] text-white/35 mt-1">Include /v1 if your provider uses it (e.g., https://api.openai.com/v1)</p>
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] text-white/45 mb-1 block">API Key</label>
+                      <div className="relative">
+                        <input
+                          type={showOpenAICompatibleKey ? 'text' : 'password'}
+                          value={ai.openaiCompatibleApiKey}
+                          onChange={(e) => updateAI({ openaiCompatibleApiKey: e.target.value.trim() })}
+                          placeholder="sk-..."
+                          className="w-full bg-white/[0.04] border border-white/[0.08] rounded-md px-2.5 py-2 pr-9 text-sm text-white/90 placeholder-white/30 focus:outline-none focus:border-blue-500/50"
+                        />
+                        <button
+                          onClick={() => setShowOpenAICompatibleKey(!showOpenAICompatibleKey)}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-white/40 hover:text-white/70"
+                        >
+                          {showOpenAICompatibleKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] text-white/45 mb-1 block">Model Name</label>
+                      <input
+                        type="text"
+                        value={ai.openaiCompatibleModel}
+                        onChange={(e) => {
+                          const modelName = e.target.value.trim();
+                          updateAI({ 
+                            openaiCompatibleModel: modelName,
+                            defaultModel: modelName ? `openai-compatible-${modelName}` : ''
+                          });
+                        }}
+                        placeholder="anthropic/claude-3.5-sonnet"
+                        className="w-full bg-white/[0.04] border border-white/[0.08] rounded-md px-2.5 py-2 text-sm text-white/90 placeholder-white/30 focus:outline-none focus:border-blue-500/50"
+                      />
+                      <p className="text-[10px] text-white/35 mt-1">The exact model name your provider expects (e.g., gpt-4o, meta-llama/llama-3.1-70b-instruct)</p>
+                    </div>
                   </div>
                 )}
 
