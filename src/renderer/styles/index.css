@@ -54,13 +54,27 @@ select {
   height: 100vh;
 }
 
-/* Glass effect background - dark frosted glass like terminal */
+/* Glass effect background - native macOS-style frosted glass */
 .glass-effect {
-  background: rgba(12, 12, 16, 0.74);
-  -webkit-backdrop-filter: blur(40px) saturate(150%);
-  backdrop-filter: blur(40px) saturate(150%);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02)),
+    rgba(18, 19, 22, 0.86);
+  -webkit-backdrop-filter: blur(54px) saturate(170%);
+  backdrop-filter: blur(54px) saturate(170%);
+  position: relative;
+  border-radius: 14px;
   border: none;
+  background-clip: padding-box;
   box-shadow: none;
+}
+
+.glass-effect::after {
+  content: '';
+  position: absolute;
+  inset: 1px;
+  border-radius: 13px;
+  border: 1px solid rgba(184, 190, 198, 0.22);
+  pointer-events: none;
 }
 
 .cursor-prompt-surface {

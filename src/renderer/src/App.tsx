@@ -1969,8 +1969,8 @@ const App: React.FC = () => {
         {/* Footer actions */}
         {!isLoading && (
           <div
-            className="flex items-center px-4 py-3.5 border-t border-white/[0.06]"
-            style={{ background: 'rgba(28,28,32,0.90)' }}
+            className="flex items-center px-4 py-3.5 border-t border-white/[0.10]"
+            style={{ background: 'rgba(22,23,27,0.84)' }}
           >
             <div
               className={`flex items-center gap-2 text-xs flex-1 min-w-0 font-medium truncate ${
