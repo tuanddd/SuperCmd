@@ -27,6 +27,8 @@ interface Action {
   style?: 'default' | 'destructive';
 }
 
+const INVALID_SNIPPET_KEYWORD_CHARS = /["'`]/;
+
 function parseArgumentPlaceholderToken(rawToken: string): { key: string; name: string; defaultValue?: string } | null {
   const token = rawToken.trim();
   if (!token.startsWith('argument')) return null;
@@ -187,6 +189,10 @@ const SnippetForm: React.FC<SnippetFormProps> = ({ snippet, onSave, onCancel }) 
     const newErrors: Record<string, string> = {};
     if (!name.trim()) newErrors.name = 'Name is required';
     if (!content.trim()) newErrors.content = 'Snippet content is required';
+    const trimmedKeyword = keyword.trim();
+    if (trimmedKeyword && INVALID_SNIPPET_KEYWORD_CHARS.test(trimmedKeyword)) {
+      newErrors.keyword = 'Keyword cannot include ", \', or `';
+    }
 
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
@@ -290,12 +296,18 @@ const SnippetForm: React.FC<SnippetFormProps> = ({ snippet, onSave, onCancel }) 
             <input
               type="text"
               value={keyword}
-              onChange={(e) => setKeyword(e.target.value)}
+              onChange={(e) => {
+                setKeyword(e.target.value);
+                setErrors((p) => ({ ...p, keyword: '' }));
+              }}
               placeholder="Optional keyword"
               className="w-full bg-white/[0.06] border border-white/[0.08] rounded-lg px-2.5 py-1.5 text-white/90 text-[13px] placeholder-white/30 outline-none focus:border-white/20 transition-colors"
             />
+            {errors.keyword && <p className="text-red-400 text-xs mt-1">{errors.keyword}</p>}
             <p className="text-white/25 text-xs mt-2">
               Typing this keyword in the snippet search instantly targets this snippet for replacement.
+              <br />
+              Disallowed characters: ", ', `
             </p>
           </div>
         </div>
