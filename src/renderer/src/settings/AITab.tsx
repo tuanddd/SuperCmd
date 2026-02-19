@@ -512,7 +512,7 @@ const AITab: React.FC = () => {
   );
 
   return (
-    <div className="w-full max-w-6xl mx-auto">
+    <div className="w-full">
       <div className="bg-white/[0.03] rounded-lg border border-white/[0.07] p-2.5 mb-2">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 min-w-0">
