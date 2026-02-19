@@ -39,6 +39,7 @@ export interface AppSettings {
   enabledCommands: string[];
   customExtensionFolders: string[];
   commandHotkeys: Record<string, string>;
+  commandAliases: Record<string, string>;
   pinnedCommands: string[];
   recentCommands: string[];
   hasSeenOnboarding: boolean;
@@ -83,6 +84,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     'system-supercmd-whisper-speak-toggle': 'Fn',
     'system-supercmd-speak': 'Command+Shift+S',
   },
+  commandAliases: {},
   pinnedCommands: [],
   recentCommands: [],
   hasSeenOnboarding: false,
@@ -104,6 +106,7 @@ export function loadSettings(): AppSettings {
     const raw = fs.readFileSync(getSettingsPath(), 'utf-8');
     const parsed = JSON.parse(raw);
     const parsedHotkeys = { ...(parsed.commandHotkeys || {}) };
+    const parsedAliases = { ...(parsed.commandAliases || {}) } as Record<string, any>;
     if (!parsedHotkeys['system-supercmd-whisper-speak-toggle']) {
       if (parsedHotkeys['system-supercmd-whisper-start']) {
         parsedHotkeys['system-supercmd-whisper-speak-toggle'] = parsedHotkeys['system-supercmd-whisper-start'];
@@ -122,6 +125,13 @@ export function loadSettings(): AppSettings {
     delete parsedHotkeys['system-supercmd-whisper-toggle'];
     delete parsedHotkeys['system-supercmd-whisper-start'];
     delete parsedHotkeys['system-supercmd-whisper-stop'];
+    const normalizedAliases: Record<string, string> = {};
+    for (const [commandId, aliasValue] of Object.entries(parsedAliases)) {
+      const normalizedCommandId = String(commandId || '').trim();
+      const normalizedAlias = String(aliasValue || '').trim();
+      if (!normalizedCommandId || !normalizedAlias) continue;
+      normalizedAliases[normalizedCommandId] = normalizedAlias;
+    }
       settingsCache = {
         globalShortcut: parsed.globalShortcut ?? DEFAULT_SETTINGS.globalShortcut,
         openAtLogin: parsed.openAtLogin ?? DEFAULT_SETTINGS.openAtLogin,
@@ -135,6 +145,10 @@ export function loadSettings(): AppSettings {
         commandHotkeys: {
         ...DEFAULT_SETTINGS.commandHotkeys,
         ...parsedHotkeys,
+      },
+      commandAliases: {
+        ...DEFAULT_SETTINGS.commandAliases,
+        ...normalizedAliases,
       },
       pinnedCommands: parsed.pinnedCommands ?? DEFAULT_SETTINGS.pinnedCommands,
       recentCommands: parsed.recentCommands ?? DEFAULT_SETTINGS.recentCommands,

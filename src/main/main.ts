@@ -5677,6 +5677,9 @@ app.whenReady().then(async () => {
     'save-settings',
     async (_event: any, patch: Partial<AppSettings>) => {
       const result = saveSettings(patch);
+      if (patch.commandAliases !== undefined) {
+        invalidateCache();
+      }
       if (patch.customExtensionFolders !== undefined) {
         invalidateCache();
         try {

@@ -51,6 +51,7 @@ const STALE_OVERLAY_RESET_MS = 60_000;
 
 const App: React.FC = () => {
   const [commands, setCommands] = useState<CommandInfo[]>([]);
+  const [commandAliases, setCommandAliases] = useState<Record<string, string>>({});
   const [pinnedCommands, setPinnedCommands] = useState<string[]>([]);
   const [recentCommands, setRecentCommands] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -196,6 +197,15 @@ const App: React.FC = () => {
       const shortcutStatus = await window.electron.getGlobalShortcutStatus();
       setPinnedCommands(settings.pinnedCommands || []);
       setRecentCommands(settings.recentCommands || []);
+      setCommandAliases(
+        Object.entries(settings.commandAliases || {}).reduce((acc, [commandId, alias]) => {
+          const normalizedCommandId = String(commandId || '').trim();
+          const normalizedAlias = String(alias || '').trim();
+          if (!normalizedCommandId || !normalizedAlias) return acc;
+          acc[normalizedCommandId] = normalizedAlias;
+          return acc;
+        }, {} as Record<string, string>)
+      );
       setLauncherShortcut(settings.globalShortcut || 'Alt+Space');
       const speakToggleHotkey = settings.commandHotkeys?.['system-supercmd-whisper-speak-toggle'] || 'Fn';
       setWhisperSpeakToggleLabel(formatShortcutLabel(speakToggleHotkey));
@@ -208,6 +218,7 @@ const App: React.FC = () => {
       console.error('Failed to load launcher preferences:', e);
       setPinnedCommands([]);
       setRecentCommands([]);
+      setCommandAliases({});
       setLauncherShortcut('Alt+Space');
       setConfiguredEdgeTtsVoice('en-US-EricNeural');
       setConfiguredTtsModel('edge-tts');
@@ -1854,6 +1865,11 @@ const App: React.FC = () => {
                       const flatIndex = startIndex + i;
                       const accessoryLabel = getCommandAccessoryLabel(command);
                       const fallbackCategory = getCategoryLabel(command.category);
+                      const commandAlias = String(commandAliases[command.id] || '').trim();
+                      const aliasMatchesSearch =
+                        Boolean(commandAlias) &&
+                        Boolean(searchQuery.trim()) &&
+                        commandAlias.toLowerCase().includes(searchQuery.trim().toLowerCase());
                       acc.nodes.push(
                         <div
                           key={command.id}
@@ -1892,6 +1908,11 @@ const App: React.FC = () => {
                                   {fallbackCategory}
                                 </div>
                               )}
+                              {aliasMatchesSearch ? (
+                                <div className="inline-flex items-center h-5 rounded-md border border-white/[0.20] bg-white/[0.03] px-1.5 text-[10px] font-mono text-white/75 leading-none flex-shrink-0">
+                                  {commandAlias}
+                                </div>
+                              ) : null}
                             </div>
                           </div>
                         </div>

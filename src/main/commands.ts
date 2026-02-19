@@ -1073,12 +1073,19 @@ async function discoverAndBuildCommands(): Promise<CommandInfo[]> {
 
   // Runtime metadata overlays (used by updateCommandMetadata and inline scripts).
   try {
-    const commandMetadata = loadSettings().commandMetadata || {};
+    const loadedSettings = loadSettings();
+    const commandMetadata = loadedSettings.commandMetadata || {};
+    const commandAliases = loadedSettings.commandAliases || {};
     for (const cmd of allCommands) {
-      if (cmd.category === 'script' && cmd.mode !== 'inline') continue;
-      const subtitle = String(commandMetadata[cmd.id]?.subtitle || '').trim();
-      if (subtitle) {
-        cmd.subtitle = subtitle;
+      if (!(cmd.category === 'script' && cmd.mode !== 'inline')) {
+        const subtitle = String(commandMetadata[cmd.id]?.subtitle || '').trim();
+        if (subtitle) {
+          cmd.subtitle = subtitle;
+        }
+      }
+      const alias = String(commandAliases[cmd.id] || '').trim();
+      if (alias) {
+        cmd.keywords = Array.from(new Set([...(cmd.keywords || []), alias]));
       }
     }
   } catch {}

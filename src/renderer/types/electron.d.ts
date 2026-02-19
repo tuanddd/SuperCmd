@@ -156,6 +156,7 @@ export interface AppSettings {
   enabledCommands: string[];
   customExtensionFolders: string[];
   commandHotkeys: Record<string, string>;
+  commandAliases: Record<string, string>;
   pinnedCommands: string[];
   recentCommands: string[];
   hasSeenOnboarding: boolean;

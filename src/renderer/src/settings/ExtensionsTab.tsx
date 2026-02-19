@@ -99,6 +99,8 @@ const ExtensionsTab: React.FC<{
     type: 'idle' | 'success' | 'error';
     text: string;
   }>({ type: 'idle', text: '' });
+  const [aliasDrafts, setAliasDrafts] = useState<Record<string, string>>({});
+  const [editingAliasCommandId, setEditingAliasCommandId] = useState<string | null>(null);
   const [folderStatus, setFolderStatus] = useState<{
     type: 'idle' | 'success' | 'error';
     text: string;
@@ -379,17 +381,23 @@ const ExtensionsTab: React.FC<{
           schema.extName.toLowerCase().includes(q) ||
           schema.description.toLowerCase().includes(q);
         const commandsMatched = schema.commands.filter(
-          (cmd) =>
-            cmd.title.toLowerCase().includes(q) ||
-            cmd.name.toLowerCase().includes(q) ||
-            cmd.description.toLowerCase().includes(q)
+          (cmd) => {
+            const commandInfo = resolveCommandInfo(schema.extName, cmd.name);
+            const commandAlias = commandInfo ? String(settings?.commandAliases?.[commandInfo.id] || '').toLowerCase() : '';
+            return (
+              cmd.title.toLowerCase().includes(q) ||
+              cmd.name.toLowerCase().includes(q) ||
+              cmd.description.toLowerCase().includes(q) ||
+              commandAlias.includes(q)
+            );
+          }
         );
         if (matchesExtension) return schema;
         if (commandsMatched.length > 0) return { ...schema, commands: commandsMatched };
         return null;
       })
       .filter(Boolean) as InstalledExtensionSettingsSchema[];
-  }, [displaySchemas, search]);
+  }, [displaySchemas, search, settings]);
 
   useEffect(() => {
     if (displaySchemas.length === 0) {
@@ -506,6 +514,54 @@ const ExtensionsTab: React.FC<{
     setHotkeyStatus({ type: 'success', text: hotkey ? 'Hotkey updated.' : 'Hotkey removed.' });
     setTimeout(() => setHotkeyStatus({ type: 'idle', text: '' }), 1800);
   };
+
+  const getCommandAlias = useCallback(
+    (commandId: string): string => String(settings?.commandAliases?.[commandId] || '').trim(),
+    [settings]
+  );
+
+  const startAliasEditing = useCallback(
+    (commandId: string) => {
+      const existingAlias = getCommandAlias(commandId);
+      setAliasDrafts((prev) => ({ ...prev, [commandId]: existingAlias }));
+      setEditingAliasCommandId(commandId);
+    },
+    [getCommandAlias]
+  );
+
+  const cancelAliasEditing = useCallback((commandId: string) => {
+    setEditingAliasCommandId((prev) => (prev === commandId ? null : prev));
+    setAliasDrafts((prev) => {
+      const next = { ...prev };
+      delete next[commandId];
+      return next;
+    });
+  }, []);
+
+  const saveCommandAlias = useCallback(
+    async (commandId: string, draftValue: string) => {
+      if (!settings) return;
+      const trimmed = String(draftValue || '').trim();
+      const existing = getCommandAlias(commandId);
+
+      if (trimmed === existing) {
+        cancelAliasEditing(commandId);
+        return;
+      }
+
+      const nextAliases = { ...(settings.commandAliases || {}) };
+      if (trimmed) {
+        nextAliases[commandId] = trimmed;
+      } else {
+        delete nextAliases[commandId];
+      }
+
+      await window.electron.saveSettings({ commandAliases: nextAliases });
+      setSettings((prev) => (prev ? { ...prev, commandAliases: nextAliases } : prev));
+      cancelAliasEditing(commandId);
+    },
+    [cancelAliasEditing, getCommandAlias, settings]
+  );
 
   const getPreferenceValues = (extName: string, cmdName?: string): Record<string, any> => {
     if (!cmdName) return readJsonObject(getExtPrefsKey(extName));
@@ -850,6 +906,9 @@ const ExtensionsTab: React.FC<{
                   {expandedExtensions[schema.extName] && schema.commands.map((cmd) => {
                     const commandInfo = resolveCommandInfo(schema.extName, cmd.name);
                     const enabled = isCommandEnabled(commandInfo);
+                    const currentAlias = commandInfo ? getCommandAlias(commandInfo.id) : '';
+                    const isAliasEditing = commandInfo ? editingAliasCommandId === commandInfo.id : false;
+                    const aliasDraftValue = commandInfo ? (aliasDrafts[commandInfo.id] ?? currentAlias) : '';
                     return (
                       <div
                         key={`${schema.extName}/${cmd.name}`}
@@ -876,7 +935,58 @@ const ExtensionsTab: React.FC<{
                             <span className="text-xs text-white/85 truncate">{cmd.title}</span>
                           </button>
                           <span className="text-xs text-white/55">{getModeTypeLabel(cmd.mode, commandInfo)}</span>
-                          <span className="text-xs text-white/45">Add Alias</span>
+                          {commandInfo ? (
+                            <div className="min-w-0">
+                              {isAliasEditing ? (
+                                <input
+                                  autoFocus
+                                  value={aliasDraftValue}
+                                  onChange={(e) => setAliasDrafts((prev) => ({ ...prev, [commandInfo.id]: e.target.value }))}
+                                  onBlur={(e) => {
+                                    if (e.currentTarget.dataset.cancelled === '1') {
+                                      e.currentTarget.dataset.cancelled = '0';
+                                      cancelAliasEditing(commandInfo.id);
+                                      return;
+                                    }
+                                    void saveCommandAlias(commandInfo.id, e.target.value);
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      e.preventDefault();
+                                      (e.currentTarget as HTMLInputElement).blur();
+                                      return;
+                                    }
+                                    if (e.key === 'Escape') {
+                                      e.preventDefault();
+                                      e.currentTarget.dataset.cancelled = '1';
+                                      (e.currentTarget as HTMLInputElement).blur();
+                                    }
+                                  }}
+                                  placeholder="Add Alias"
+                                  className="h-6 w-full min-w-0 rounded-md border border-white/[0.18] bg-white/[0.02] px-2 font-mono text-[11px] text-white/80 placeholder-white/38 outline-none focus:border-white/[0.36]"
+                                />
+                              ) : currentAlias ? (
+                                <button
+                                  type="button"
+                                  onClick={() => startAliasEditing(commandInfo.id)}
+                                  className="inline-flex h-6 max-w-full items-center rounded-md border border-white/[0.18] bg-white/[0.02] px-2 font-mono text-[11px] text-white/72 hover:border-white/[0.28] hover:text-white/78 transition-colors"
+                                  title="Edit alias"
+                                >
+                                  <span className="truncate">{currentAlias}</span>
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => startAliasEditing(commandInfo.id)}
+                                  className="text-xs text-white/45 hover:text-white/75 transition-colors"
+                                >
+                                  Add Alias
+                                </button>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-xs text-white/25">--</span>
+                          )}
                           {commandInfo ? (
                             <>
                               <div className="flex items-center">
