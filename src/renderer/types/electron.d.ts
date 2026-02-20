@@ -112,6 +112,9 @@ export interface AISettings {
   edgeTtsVoice: string;
   speechCorrectionEnabled: boolean;
   enabled: boolean;
+  llmEnabled: boolean;
+  whisperEnabled: boolean;
+  readEnabled: boolean;
   openaiCompatibleBaseUrl: string;
   openaiCompatibleApiKey: string;
   openaiCompatibleModel: string;

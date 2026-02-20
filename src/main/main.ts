@@ -2164,7 +2164,8 @@ function startFnSpeakToggleWatcher(): void {
       try {
         const payload = JSON.parse(trimmed);
         if (payload?.pressed) {
-          if (isAIDisabledInSettings()) {
+          const currentSettings = loadSettings();
+          if (isAIDisabledInSettings(currentSettings) || currentSettings.ai?.whisperEnabled === false) {
             continue;
           }
           const now = Date.now();
@@ -2241,7 +2242,8 @@ function syncFnSpeakToggleWatcher(hotkeys: Record<string, string>): void {
     stopFnSpeakToggleWatcher();
     return;
   }
-  if (isAIDisabledInSettings()) {
+  const currentSettings = loadSettings();
+  if (isAIDisabledInSettings(currentSettings) || currentSettings.ai?.whisperEnabled === false) {
     stopFnSpeakToggleWatcher();
     return;
   }
@@ -3966,8 +3968,23 @@ function isAIDependentSystemCommand(commandId: string): boolean {
   return AI_DISABLED_SYSTEM_COMMANDS.has(String(commandId || '').trim());
 }
 
+function isAISectionDisabledForCommand(commandId: string, settings?: AppSettings): boolean {
+  const resolved = settings || loadSettings();
+  const id = String(commandId || '').trim();
+  if (!id) return false;
+  if (id === 'system-supercmd-speak') return resolved.ai?.readEnabled === false;
+  if (id === 'system-supercmd-whisper' || id === 'system-supercmd-whisper-toggle' || id === 'system-supercmd-whisper-speak-toggle') {
+    return resolved.ai?.whisperEnabled === false;
+  }
+  if (id === 'system-cursor-prompt' || id === 'system-add-to-memory') return resolved.ai?.llmEnabled === false;
+  return false;
+}
+
 async function runCommandById(commandId: string, source: 'launcher' | 'hotkey' = 'launcher'): Promise<boolean> {
   if (isAIDependentSystemCommand(commandId) && isAIDisabledInSettings()) {
+    return false;
+  }
+  if (isAISectionDisabledForCommand(commandId)) {
     return false;
   }
 
@@ -5735,7 +5752,9 @@ app.whenReady().then(async () => {
     const enabled = new Set((s as any).enabledCommands || []);
     const aiDisabled = isAIDisabledInSettings(s);
     return commands.filter((c: any) => {
-      if (aiDisabled && isAIDependentSystemCommand(String(c?.id || ''))) return false;
+      const commandId = String(c?.id || '');
+      if (aiDisabled && isAIDependentSystemCommand(commandId)) return false;
+      if (isAISectionDisabledForCommand(commandId, s)) return false;
       if (disabled.has(c.id)) return false;
       if (c?.disabledByDefault && !enabled.has(c.id)) return false;
       return true;
@@ -5836,6 +5855,7 @@ app.whenReady().then(async () => {
     async (_event: any, payload?: { voice: string; text?: string; rate?: string; provider?: 'edge-tts' | 'elevenlabs'; model?: string }) => {
       const settings = loadSettings();
       if (isAIDisabledInSettings(settings)) return false;
+      if (settings.ai?.readEnabled === false) return false;
       const provider = payload?.provider || (String(settings.ai?.textToSpeechModel || '').startsWith('elevenlabs-') ? 'elevenlabs' : 'edge-tts');
       const voice = String(payload?.voice || speakRuntimeOptions.voice || 'en-US-EricNeural').trim();
       const rate = parseSpeakRateInput(payload?.rate ?? speakRuntimeOptions.rate);
@@ -7719,6 +7739,10 @@ return appURL's |path|() as text`,
     'ai-ask',
     async (event: any, requestId: string, prompt: string, options?: { model?: string; creativity?: number; systemPrompt?: string }) => {
       const s = loadSettings();
+      if (s.ai?.llmEnabled === false) {
+        event.sender.send('ai-stream-error', { requestId, error: 'LLM is disabled in Settings → AI.' });
+        return;
+      }
       if (!isAIAvailable(s.ai)) {
         event.sender.send('ai-stream-error', { requestId, error: 'AI is not configured. Please set up an API key in Settings → AI.' });
         return;
@@ -7773,11 +7797,13 @@ return appURL's |path|() as text`,
 
   ipcMain.handle('ai-is-available', () => {
     const s = loadSettings();
+    if (s.ai?.llmEnabled === false) return false;
     return isAIAvailable(s.ai);
   });
 
   ipcMain.handle('whisper-refine-transcript', async (_event: any, transcript: string) => {
-    if (isAIDisabledInSettings()) {
+    const s = loadSettings();
+    if (isAIDisabledInSettings(s) || s.ai?.llmEnabled === false || s.ai?.whisperEnabled === false) {
       return { correctedText: String(transcript || ''), source: 'raw' as const };
     }
     return await refineWhisperTranscript(transcript);
@@ -7789,6 +7815,9 @@ return appURL's |path|() as text`,
       const s = loadSettings();
       if (isAIDisabledInSettings(s)) {
         throw new Error('AI is disabled. Enable AI in Settings -> AI to use Whisper.');
+      }
+      if (s.ai?.whisperEnabled === false) {
+        throw new Error('SuperCmd Whisper is disabled in Settings -> AI.');
       }
 
       // Parse speechToTextModel to a concrete provider model.

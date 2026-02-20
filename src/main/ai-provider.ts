@@ -101,6 +101,7 @@ function hasProviderCredentials(provider: ModelRoute['provider'], config: AISett
 export function isAIAvailable(config: AISettings): boolean {
   // Treat missing/legacy "enabled" as enabled by default.
   if (config.enabled === false) return false;
+  if (config.llmEnabled === false) return false;
 
   // Availability should follow the effective model route (defaultModel can
   // point to a different provider than config.provider).

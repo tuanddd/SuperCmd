@@ -27,6 +27,9 @@ export interface AISettings {
   edgeTtsVoice: string;
   speechCorrectionEnabled: boolean;
   enabled: boolean;
+  llmEnabled: boolean;
+  whisperEnabled: boolean;
+  readEnabled: boolean;
   openaiCompatibleBaseUrl: string;
   openaiCompatibleApiKey: string;
   openaiCompatibleModel: string;
@@ -98,6 +101,9 @@ const DEFAULT_AI_SETTINGS: AISettings = {
   edgeTtsVoice: 'en-US-EricNeural',
   speechCorrectionEnabled: false,
   enabled: true,
+  llmEnabled: true,
+  whisperEnabled: true,
+  readEnabled: true,
   openaiCompatibleBaseUrl: '',
   openaiCompatibleApiKey: '',
   openaiCompatibleModel: '',
