@@ -536,7 +536,7 @@ const AITab: React.FC = () => {
 
   return (
     <div className="w-full max-w-[980px] mx-auto">
-      <div className="overflow-hidden rounded-xl border border-white/[0.10] bg-[rgba(18,16,17,0.30)]">
+      <div className="overflow-hidden rounded-xl border border-white/[0.10] bg-[rgba(20,20,20,0.34)]">
       <AIRow
         icon={<Brain className="w-4 h-4" />}
         title="Enable AI"

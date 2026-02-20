@@ -816,7 +816,7 @@ const ExtensionsTab: React.FC<{
 
   return (
     <div className="h-full min-h-0 flex flex-col">
-      <div className="flex flex-1 min-h-0 bg-[rgba(18,16,17,0.26)]">
+      <div className="flex flex-1 min-h-0 bg-[rgba(20,20,20,0.30)]">
         <div className="flex-[0_0_66%] min-w-[600px] h-full border-r border-white/[0.08] flex flex-col">
           <div className="px-3 py-2 border-b border-white/[0.06]">
             <div className="flex items-center gap-2">
