@@ -3025,6 +3025,11 @@ function showPromptWindow(
   promptWindow.focus();
   promptWindow.moveTop();
   promptWindow.webContents.focus();
+  const selectedTextSnapshot = String(getRecentSelectionSnapshot() || lastCursorPromptSelection || '').trim();
+  promptWindow.webContents.send('window-shown', {
+    mode: 'prompt',
+    selectedTextSnapshot,
+  });
 }
 
 function hidePromptWindow(): void {
@@ -3378,9 +3383,10 @@ async function showWindow(options?: { systemCommandId?: string }): Promise<void>
   // Skip during onboarding to avoid any focus-stealing side effects during setup.
   if (launcherMode !== 'onboarding') {
     captureFrontmostAppContext();
-    // Snapshot selected text for contextual commands without stealing selection
-    // or triggering system beep from synthetic Cmd+C.
-    selectionSnapshotPromise = captureSelectionSnapshotBeforeShow({ allowClipboardFallback: false });
+    // Snapshot selected text before launcher focus changes the active app.
+    // Clipboard fallback is enabled so selection works in apps that do not
+    // expose AXSelectedText.
+    selectionSnapshotPromise = captureSelectionSnapshotBeforeShow({ allowClipboardFallback: true });
   }
 
   applyLauncherBounds(launcherMode);
@@ -4066,7 +4072,16 @@ async function runCommandById(commandId: string, source: 'launcher' | 'hotkey' =
     return true;
   }
   if (isCursorPromptCommand) {
-    lastCursorPromptSelection = '';
+    const selectedBeforeOpenRaw = String(
+      await getSelectedTextForSpeak({ allowClipboardFallback: true }) || getRecentSelectionSnapshot() || ''
+    );
+    const selectedBeforeOpen = selectedBeforeOpenRaw.trim();
+    if (selectedBeforeOpen) {
+      rememberSelectionSnapshot(selectedBeforeOpenRaw);
+      lastCursorPromptSelection = selectedBeforeOpenRaw;
+    } else {
+      lastCursorPromptSelection = String(getRecentSelectionSnapshot() || '');
+    }
     captureFrontmostAppContext();
     // Capture caret/input anchor before prompt focus changes active UI element.
     const earlyCaretRect = getTypingCaretRect();
@@ -4082,8 +4097,7 @@ async function runCommandById(commandId: string, source: 'launcher' | 'hotkey' =
     }
     // Open anchored to the captured typing caret (not mouse pointer).
     showPromptWindow(earlyCaretRect, earlyInputRect);
-    // Snapshot selection in background without synthetic Cmd+C fallback so open
-    // is not blocked and does not trigger beeps in the active app.
+    // Refresh selection in the background for AX-compatible apps.
     void getSelectedTextForSpeak({ allowClipboardFallback: false, clipboardWaitMs: 0 })
       .then((selectedBeforeOpen) => {
         const selected = String(selectedBeforeOpen || '').trim();
@@ -4094,7 +4108,11 @@ async function runCommandById(commandId: string, source: 'launcher' | 'hotkey' =
     return true;
   }
   if (commandId === 'system-add-to-memory') {
-    const selectedTextRaw = String(await getSelectedTextForSpeak() || getRecentSelectionSnapshot() || '');
+    const selectedTextRaw = String(
+      await getSelectedTextForSpeak({
+        allowClipboardFallback: source !== 'launcher',
+      }) || getRecentSelectionSnapshot() || ''
+    );
     const selectedText = selectedTextRaw.trim();
     if (!selectedText) return false;
     rememberSelectionSnapshot(selectedTextRaw);

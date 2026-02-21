@@ -1075,7 +1075,9 @@ const App: React.FC = () => {
       if (memoryActionLoading) return true;
       setMemoryActionLoading(true);
       setMemoryFeedback(null);
-      const selectedText = String(await window.electron.getSelectedTextStrict() || '').trim();
+      const selectedText = String(
+        await window.electron.getSelectedTextStrict() || selectedTextSnapshot || ''
+      ).trim();
       if (!selectedText) {
         setSelectedTextSnapshot('');
         setMemoryActionLoading(false);
@@ -1153,7 +1155,7 @@ const App: React.FC = () => {
       return true;
     }
     return false;
-  }, [memoryActionLoading, showMemoryFeedback, showOnboarding, openOnboarding, openWhisper, setShowWhisper, setShowWhisperOnboarding, setShowWhisperHint, openClipboardManager, openSnippetManager, openFileSearch, openSpeak, setShowSpeak]);
+  }, [memoryActionLoading, selectedTextSnapshot, showMemoryFeedback, showOnboarding, openOnboarding, openWhisper, setShowWhisper, setShowWhisperOnboarding, setShowWhisperHint, openClipboardManager, openSnippetManager, openFileSearch, openSpeak, setShowSpeak]);
 
   useEffect(() => {
     const cleanup = window.electron.onRunSystemCommand(async (commandId: string) => {
