@@ -504,8 +504,8 @@ const AITab: React.FC = () => {
       onClick={() => setActiveTab(id)}
       className={`px-2.5 py-1 rounded-md text-[12px] font-medium transition-colors ${
         activeTab === id
-          ? 'bg-blue-500/25 text-blue-200 border border-blue-400/30'
-          : 'bg-[var(--ui-segment-bg)] text-[var(--text-subtle)] border border-[var(--ui-divider)] hover:text-[var(--text-secondary)] hover:bg-[var(--ui-segment-bg)]'
+          ? 'bg-[var(--ui-segment-active-bg)] text-[var(--text-primary)] border border-[var(--ui-segment-border)]'
+          : 'bg-[var(--ui-segment-bg)] text-[var(--text-muted)] border border-[var(--ui-divider)] hover:text-[var(--text-secondary)] hover:bg-[var(--ui-segment-hover-bg)]'
       }`}
     >
       {label}
@@ -548,14 +548,16 @@ const AITab: React.FC = () => {
       onClick={onToggle}
       className={`relative w-10 h-6 rounded-full border transition-colors ${
         enabled
-          ? 'bg-blue-500 border-blue-400/40'
+          ? 'bg-[var(--accent)] border-[var(--accent-hover)]'
           : 'bg-[var(--ui-segment-bg)] border-[var(--ui-segment-border)]'
       }`}
       aria-label={label}
     >
       <span
-        className={`absolute top-1 w-4 h-4 rounded-full transition-transform ${
-          enabled ? 'left-5 bg-white' : 'left-1 bg-[var(--text-muted)]'
+        className={`absolute left-0.5 top-1/2 h-4 w-4 -translate-y-1/2 rounded-full border shadow-sm transition-transform ${
+          enabled
+            ? 'translate-x-[18px] bg-[var(--bg-overlay-strong)] border-[var(--ui-segment-border)]'
+            : 'translate-x-0 bg-[var(--bg-overlay-strong)] border-[var(--ui-segment-border)]'
         }`}
       />
     </button>
@@ -574,13 +576,15 @@ const AITab: React.FC = () => {
             onClick={() => updateAI({ enabled: !ai.enabled })}
             className={`relative w-10 h-6 rounded-full border transition-colors ${
               ai.enabled
-                ? 'bg-blue-500 border-blue-400/40'
+                ? 'bg-[var(--accent)] border-[var(--accent-hover)]'
                 : 'bg-[var(--ui-segment-bg)] border-[var(--ui-segment-border)]'
             }`}
           >
             <span
-              className={`absolute top-1 w-4 h-4 rounded-full transition-transform ${
-                ai.enabled ? 'left-5 bg-white' : 'left-1 bg-[var(--text-muted)]'
+              className={`absolute left-0.5 top-1/2 h-4 w-4 -translate-y-1/2 rounded-full border shadow-sm transition-transform ${
+                ai.enabled
+                  ? 'translate-x-[18px] bg-[var(--bg-overlay-strong)] border-[var(--ui-segment-border)]'
+                  : 'translate-x-0 bg-[var(--bg-overlay-strong)] border-[var(--ui-segment-border)]'
               }`}
             />
           </button>
@@ -600,18 +604,18 @@ const AITab: React.FC = () => {
           <div className="grid grid-cols-1">
             <div className={`px-4 py-3.5 md:px-5 space-y-3 ${activeTab === 'llm' ? 'hidden' : ''}`}>
                 <div>
-                  <label className="text-[12px] text-[var(--text-muted)] mb-1 block">ChatGPT (OpenAI) API Key</label>
+                  <label className="text-[12px] text-[var(--text-secondary)] mb-1 block">ChatGPT (OpenAI) API Key</label>
                   <div className="relative">
                     <input
                       type={showOpenAIKey ? 'text' : 'password'}
                       value={ai.openaiApiKey}
                       onChange={(e) => updateAI({ openaiApiKey: e.target.value.trim() })}
                       placeholder="sk-..."
-                      className="w-full bg-[var(--ui-segment-bg)] border border-[var(--ui-divider)] rounded-md px-2.5 py-2 pr-9 text-sm text-[var(--text-secondary)] placeholder:text-[color:var(--text-subtle)] focus:outline-none focus:border-blue-500/50"
+                      className="w-full bg-[var(--ui-segment-bg)] border border-[var(--ui-divider)] rounded-md px-2.5 py-2 pr-9 text-sm text-[var(--text-primary)] placeholder:text-[color:var(--text-muted)] focus:outline-none focus:border-blue-500/50"
                     />
                     <button
                       onClick={() => setShowOpenAIKey(!showOpenAIKey)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-subtle)] hover:text-[var(--text-muted)]"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
                     >
                       {showOpenAIKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
@@ -619,18 +623,18 @@ const AITab: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="text-[12px] text-[var(--text-muted)] mb-1 block">Claude (Anthropic) API Key</label>
+                  <label className="text-[12px] text-[var(--text-secondary)] mb-1 block">Claude (Anthropic) API Key</label>
                   <div className="relative">
                     <input
                       type={showAnthropicKey ? 'text' : 'password'}
                       value={ai.anthropicApiKey}
                       onChange={(e) => updateAI({ anthropicApiKey: e.target.value.trim() })}
                       placeholder="sk-ant-..."
-                      className="w-full bg-[var(--ui-segment-bg)] border border-[var(--ui-divider)] rounded-md px-2.5 py-2 pr-9 text-sm text-[var(--text-secondary)] placeholder:text-[color:var(--text-subtle)] focus:outline-none focus:border-blue-500/50"
+                      className="w-full bg-[var(--ui-segment-bg)] border border-[var(--ui-divider)] rounded-md px-2.5 py-2 pr-9 text-sm text-[var(--text-primary)] placeholder:text-[color:var(--text-muted)] focus:outline-none focus:border-blue-500/50"
                     />
                     <button
                       onClick={() => setShowAnthropicKey(!showAnthropicKey)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-subtle)] hover:text-[var(--text-muted)]"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
                     >
                       {showAnthropicKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
@@ -638,18 +642,18 @@ const AITab: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="text-[12px] text-[var(--text-muted)] mb-1 block">ElevenLabs API Key</label>
+                  <label className="text-[12px] text-[var(--text-secondary)] mb-1 block">ElevenLabs API Key</label>
                   <div className="relative">
                     <input
                       type={showElevenLabsKey ? 'text' : 'password'}
                       value={ai.elevenlabsApiKey || ''}
                       onChange={(e) => updateAI({ elevenlabsApiKey: e.target.value.trim() })}
                       placeholder="xi-..."
-                      className="w-full bg-[var(--ui-segment-bg)] border border-[var(--ui-divider)] rounded-md px-2.5 py-2 pr-9 text-sm text-[var(--text-secondary)] placeholder:text-[color:var(--text-subtle)] focus:outline-none focus:border-blue-500/50"
+                      className="w-full bg-[var(--ui-segment-bg)] border border-[var(--ui-divider)] rounded-md px-2.5 py-2 pr-9 text-sm text-[var(--text-primary)] placeholder:text-[color:var(--text-muted)] focus:outline-none focus:border-blue-500/50"
                     />
                     <button
                       onClick={() => setShowElevenLabsKey(!showElevenLabsKey)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-subtle)] hover:text-[var(--text-muted)]"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
                     >
                       {showElevenLabsKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
@@ -662,18 +666,18 @@ const AITab: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="text-[12px] text-[var(--text-muted)] mb-1 block">Supermemory API Key</label>
+                  <label className="text-[12px] text-[var(--text-secondary)] mb-1 block">Supermemory API Key</label>
                   <div className="relative">
                     <input
                       type={showSupermemoryKey ? 'text' : 'password'}
                       value={ai.supermemoryApiKey || ''}
                       onChange={(e) => updateAI({ supermemoryApiKey: e.target.value.trim() })}
                       placeholder="sm-..."
-                      className="w-full bg-[var(--ui-segment-bg)] border border-[var(--ui-divider)] rounded-md px-2.5 py-2 pr-9 text-sm text-[var(--text-secondary)] placeholder:text-[color:var(--text-subtle)] focus:outline-none focus:border-blue-500/50"
+                      className="w-full bg-[var(--ui-segment-bg)] border border-[var(--ui-divider)] rounded-md px-2.5 py-2 pr-9 text-sm text-[var(--text-primary)] placeholder:text-[color:var(--text-muted)] focus:outline-none focus:border-blue-500/50"
                     />
                     <button
                       onClick={() => setShowSupermemoryKey(!showSupermemoryKey)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-subtle)] hover:text-[var(--text-muted)]"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
                     >
                       {showSupermemoryKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
@@ -681,25 +685,25 @@ const AITab: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="text-[12px] text-[var(--text-muted)] mb-1 block">Supermemory Client</label>
+                  <label className="text-[12px] text-[var(--text-secondary)] mb-1 block">Supermemory Client</label>
                   <input
                     type="text"
                     value={ai.supermemoryClient || ''}
                     onChange={(e) => updateAI({ supermemoryClient: e.target.value.trim() })}
                     placeholder="client-123"
-                    className="w-full bg-[var(--ui-segment-bg)] border border-[var(--ui-divider)] rounded-md px-2.5 py-2 text-sm text-[var(--text-secondary)] placeholder:text-[color:var(--text-subtle)] focus:outline-none focus:border-blue-500/50"
+                    className="w-full bg-[var(--ui-segment-bg)] border border-[var(--ui-divider)] rounded-md px-2.5 py-2 text-sm text-[var(--text-primary)] placeholder:text-[color:var(--text-muted)] focus:outline-none focus:border-blue-500/50"
                   />
-                  <p className="text-[10px] text-[var(--text-subtle)] mt-1">Used to scope user memory retrieval.</p>
+                  <p className="text-[10px] text-[var(--text-muted)] mt-1">Used to scope user memory retrieval.</p>
                 </div>
 
                 <div>
-                  <label className="text-[12px] text-[var(--text-muted)] mb-1 block">Supermemory Base URL</label>
+                  <label className="text-[12px] text-[var(--text-secondary)] mb-1 block">Supermemory Base URL</label>
                   <input
                     type="text"
                     value={ai.supermemoryBaseUrl || 'https://api.supermemory.ai'}
                     onChange={(e) => updateAI({ supermemoryBaseUrl: e.target.value.trim() })}
                     placeholder="https://api.supermemory.ai"
-                    className="w-full bg-[var(--ui-segment-bg)] border border-[var(--ui-divider)] rounded-md px-2.5 py-2 text-sm text-[var(--text-secondary)] placeholder:text-[color:var(--text-subtle)] focus:outline-none focus:border-blue-500/50"
+                    className="w-full bg-[var(--ui-segment-bg)] border border-[var(--ui-divider)] rounded-md px-2.5 py-2 text-sm text-[var(--text-primary)] placeholder:text-[color:var(--text-muted)] focus:outline-none focus:border-blue-500/50"
                   />
                 </div>
 
@@ -734,7 +738,7 @@ const AITab: React.FC = () => {
               </div>
 
               <div>
-                  <label className="text-[12px] text-[var(--text-muted)] mb-1 block">Provider</label>
+                  <label className="text-[12px] text-[var(--text-secondary)] mb-1 block">Provider</label>
                   <div className="grid grid-cols-2 gap-2">
                     {PROVIDER_OPTIONS.map((p) => (
                       <button
@@ -755,7 +759,7 @@ const AITab: React.FC = () => {
                         }}
                         className={`rounded-md border px-2 py-2 text-left transition-colors ${
                           ai.provider === p.id
-                            ? 'bg-blue-500/15 border-blue-500/35 text-blue-100'
+                            ? 'bg-[var(--launcher-card-selected-bg)] border-[var(--launcher-card-selected-border)] text-[var(--text-primary)]'
                             : 'bg-[var(--ui-segment-bg)] border-[var(--ui-divider)] text-[var(--text-muted)] hover:bg-[var(--ui-segment-bg)]'
                         }`}
                       >
@@ -915,7 +919,7 @@ const AITab: React.FC = () => {
                                     <span className="text-xs text-[var(--text-secondary)]">{model.label}</span>
                                     <span className="text-[10px] text-[var(--text-subtle)]">{model.size}</span>
                                     {installed && (
-                                      <span className="text-[10px] px-1.5 py-0.5 bg-green-500/15 text-green-400/80 rounded">Installed</span>
+                                      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded border border-[color:var(--status-success)] bg-[color:var(--status-success-soft)] text-[color:var(--status-success)]">Installed</span>
                                     )}
                                   </div>
                                   <p className="text-[12px] text-[var(--text-subtle)] mt-0.5">{model.description}</p>
@@ -1027,7 +1031,7 @@ const AITab: React.FC = () => {
                 </div>
               )}
 
-              <div className="pt-2 border-t border-[var(--ui-divider)] space-y-2">
+              <div className="pt-3 border-t border-[var(--ui-divider)] space-y-2">
                 <p className="text-[12px] text-[var(--text-muted)]">Whisper Hotkeys</p>
                 <div>
                   <p className="text-[12px] text-[var(--text-muted)] mb-1.5">Start/Stop Speaking</p>
@@ -1035,6 +1039,7 @@ const AITab: React.FC = () => {
                     value={(settings.commandHotkeys || {})[WHISPER_SPEAK_TOGGLE_COMMAND_ID] || 'Fn'}
                     onChange={(hotkey) => { void handleWhisperHotkeyChange(WHISPER_SPEAK_TOGGLE_COMMAND_ID, hotkey); }}
                     compact
+                    variant="whisper"
                   />
                 </div>
                 {hotkeyStatus.type !== 'idle' ? (
@@ -1055,21 +1060,11 @@ const AITab: React.FC = () => {
                   <h3 className="text-[13px] font-semibold text-[var(--text-primary)]">Smooth Output</h3>
                   <p className="text-[12px] text-[var(--text-muted)] mt-0.5 leading-snug">Clean up filler words and self-corrections.</p>
                 </div>
-                <button
-                  onClick={() => updateAI({ speechCorrectionEnabled: !ai.speechCorrectionEnabled })}
-                  className={`relative w-10 h-6 rounded-full border transition-colors ${
-                    ai.speechCorrectionEnabled
-                      ? 'bg-blue-500 border-blue-400/40'
-                      : 'bg-[var(--ui-segment-bg)] border-[var(--ui-segment-border)]'
-                  }`}
-                  aria-label="Toggle whisper smoothing"
-                >
-                  <span
-                    className={`absolute top-1 w-4 h-4 rounded-full transition-transform ${
-                      ai.speechCorrectionEnabled ? 'left-5 bg-white' : 'left-1 bg-[var(--text-muted)]'
-                    }`}
-                  />
-                </button>
+                <SectionToggle
+                  enabled={Boolean(ai.speechCorrectionEnabled)}
+                  onToggle={() => updateAI({ speechCorrectionEnabled: !ai.speechCorrectionEnabled })}
+                  label="Toggle whisper smoothing"
+                />
               </div>
 
               {ai.speechCorrectionEnabled && (
@@ -1085,7 +1080,7 @@ const AITab: React.FC = () => {
                       <option key={m.id} value={m.id}>{m.label}</option>
                     ))}
                   </select>
-                  <p className="text-[12px] text-[var(--text-subtle)] mt-1">Uses your current provider models.</p>
+                  <p className="text-[12px] text-[var(--text-muted)] mt-1">Uses your current provider models.</p>
                 </div>
               )}
             </div>
@@ -1207,7 +1202,7 @@ const AITab: React.FC = () => {
                         setPreviewingVoice(false);
                       }
                     }}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs text-blue-200 bg-blue-500/15 border border-blue-400/25 hover:bg-blue-500/25 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-[var(--accent)] bg-[var(--accent-soft)] border border-[var(--accent)] hover:brightness-95 disabled:opacity-65 disabled:cursor-not-allowed transition-colors"
                   >
                     {previewingVoice ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Volume2 className="w-3 h-3" />}
                     {previewingVoice ? 'Playing sample...' : 'Play Sample Voice'}
@@ -1324,7 +1319,7 @@ const AITab: React.FC = () => {
                         setPreviewingVoice(false);
                       }
                     }}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs text-blue-200 bg-blue-500/15 border border-blue-400/25 hover:bg-blue-500/25 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-[var(--accent)] bg-[var(--accent-soft)] border border-[var(--accent)] hover:brightness-95 disabled:opacity-65 disabled:cursor-not-allowed transition-colors"
                   >
                     {previewingVoice ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Volume2 className="w-3 h-3" />}
                     {previewingVoice ? 'Playing sample...' : 'Play Sample Voice'}

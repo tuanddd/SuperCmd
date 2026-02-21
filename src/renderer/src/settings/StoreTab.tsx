@@ -402,7 +402,7 @@ const StoreTab: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
                               {ext.title}
                             </span>
                             {installed && (
-                              <span className="text-[10px] px-1.5 py-0.5 bg-green-500/15 text-green-400/80 rounded">
+                              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded border border-[color:var(--status-success)] bg-[color:var(--status-success-soft)] text-[color:var(--status-success)]">
                                 Installed
                               </span>
                             )}

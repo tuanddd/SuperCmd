@@ -852,7 +852,7 @@ const ExtensionsTab: React.FC<{
               <div className="relative" ref={topActionsMenuRef}>
                 <button
                   onClick={() => setShowTopActionsMenu((prev) => !prev)}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs bg-blue-500/15 hover:bg-blue-500/25 text-blue-300 transition-colors whitespace-nowrap"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-[var(--accent-soft)] border border-[var(--accent)] text-[var(--accent)] hover:brightness-95 transition-colors whitespace-nowrap"
                 >
                   <Download className="w-3.5 h-3.5" />
                   <span>Install Extension</span>

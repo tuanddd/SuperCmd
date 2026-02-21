@@ -1828,7 +1828,7 @@ const App: React.FC = () => {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             onKeyDown={handleKeyDown}
-            className="flex-1 bg-transparent border-none outline-none text-[var(--text-primary)] placeholder:text-[color:var(--text-subtle)] placeholder:font-medium text-[15px] font-medium tracking-[0.005em]"
+            className="flex-1 bg-transparent border-none outline-none text-[var(--text-primary)] placeholder:text-[color:var(--text-muted)] placeholder:font-medium text-[15px] font-medium tracking-[0.005em]"
             autoFocus
           />
           {searchQuery && aiAvailable && (
@@ -1844,7 +1844,7 @@ const App: React.FC = () => {
           {searchQuery && (
             <button
               onClick={() => setSearchQuery('')}
-              className="text-white/30 hover:text-white/60 transition-colors flex-shrink-0"
+              className="text-[var(--text-subtle)] hover:text-[var(--text-muted)] transition-colors flex-shrink-0"
             >
               <X className="w-4 h-4" />
             </button>
@@ -1857,11 +1857,11 @@ const App: React.FC = () => {
           className="flex-1 overflow-y-auto custom-scrollbar p-1.5 list-area"
         >
           {isLoading ? (
-            <div className="flex items-center justify-center h-full text-white/50">
+            <div className="flex items-center justify-center h-full text-[var(--text-muted)]">
               <p className="text-sm">Discovering apps...</p>
             </div>
           ) : displayCommands.length === 0 && !calcResult ? (
-            <div className="flex items-center justify-center h-full text-white/50">
+            <div className="flex items-center justify-center h-full text-[var(--text-muted)]">
               <p className="text-sm">No matching results</p>
             </div>
           ) : (
@@ -1872,7 +1872,7 @@ const App: React.FC = () => {
                   ref={(el) => (itemRefs.current[0] = el)}
                   className={`mx-1 mt-0.5 mb-2 px-6 py-4 rounded-xl cursor-pointer transition-colors border ${
                     selectedIndex === 0
-                      ? 'bg-[var(--launcher-card-selected-bg)] border-[var(--launcher-card-selected-border)]'
+                      ? 'bg-[var(--launcher-card-selected-bg)] border-transparent'
                       : 'bg-[var(--launcher-card-bg)] border-[var(--launcher-card-border)] hover:bg-[var(--launcher-card-hover-bg)]'
                   }`}
                   onClick={() => {
@@ -1909,7 +1909,7 @@ const App: React.FC = () => {
                     acc.nodes.push(
                       <div
                         key={`section-${section.title}`}
-                        className="px-3 pt-2 pb-1 text-[11px] uppercase tracking-wider text-white/50 font-medium"
+                        className="px-3 pt-2 pb-1 text-[11px] uppercase tracking-wider text-[var(--text-subtle)] font-medium"
                       >
                         {section.title}
                       </div>
@@ -1957,12 +1957,12 @@ const App: React.FC = () => {
                                   {accessoryLabel}
                                 </div>
                               ) : (
-                                <div className="text-[var(--text-subtle)] text-[11px] font-medium truncate">
+                                <div className="text-[var(--text-muted)] text-[11px] font-medium truncate">
                                   {fallbackCategory}
                                 </div>
                               )}
                               {aliasMatchesSearch ? (
-                                <div className="inline-flex items-center h-5 rounded-md border border-[var(--launcher-chip-border)] bg-[var(--launcher-chip-bg)] px-1.5 text-[10px] font-mono text-[var(--text-muted)] leading-none flex-shrink-0">
+                                <div className="inline-flex items-center h-5 rounded-md border border-[var(--launcher-chip-border)] bg-[var(--launcher-chip-bg)] px-1.5 text-[10px] font-mono text-[var(--text-subtle)] leading-none flex-shrink-0">
                                   {commandAlias}
                                 </div>
                               ) : null}
@@ -1988,12 +1988,12 @@ const App: React.FC = () => {
             <div
               className={`flex items-center gap-2 text-xs flex-1 min-w-0 font-normal truncate ${
                 memoryActionLoading
-                  ? 'text-white/60'
+                  ? 'text-[var(--text-muted)]'
                   : memoryFeedback
                   ? memoryFeedback.type === 'success'
                     ? 'text-emerald-300'
                     : 'text-red-300'
-                  : 'text-white/50'
+                  : 'text-[var(--text-subtle)]'
               }`}
             >
               {memoryActionLoading ? (
@@ -2018,12 +2018,12 @@ const App: React.FC = () => {
               <div className="flex items-center gap-2 mr-3">
                 <button
                   onClick={() => selectedActions[0].execute()}
-                  className="text-white text-xs font-normal hover:text-white/85 transition-colors"
+                  className="text-[var(--text-primary)] text-xs font-semibold hover:text-[var(--text-primary)] transition-colors"
                 >
                   {selectedActions[0].title}
                 </button>
                 {selectedActions[0].shortcut && (
-                  <kbd className="inline-flex items-center justify-center min-w-[22px] h-[22px] px-1.5 rounded bg-[var(--kbd-bg)] text-[11px] text-white/40 font-medium">
+                  <kbd className="inline-flex items-center justify-center min-w-[22px] h-[22px] px-1.5 rounded bg-[var(--kbd-bg)] text-[11px] text-[var(--text-subtle)] font-medium">
                     {renderShortcutLabel(selectedActions[0].shortcut)}
                   </kbd>
                 )}
@@ -2034,11 +2034,11 @@ const App: React.FC = () => {
                 setContextMenu(null);
                 setShowActions(true);
               }}
-              className="flex items-center gap-1.5 text-white/50 hover:text-white/70 transition-colors"
+              className="flex items-center gap-1.5 text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
             >
               <span className="text-xs font-normal">Actions</span>
-              <kbd className="inline-flex items-center justify-center min-w-[22px] h-[22px] px-1.5 rounded bg-[var(--kbd-bg)] text-[11px] text-white/40 font-medium">⌘</kbd>
-              <kbd className="inline-flex items-center justify-center min-w-[22px] h-[22px] px-1.5 rounded bg-[var(--kbd-bg)] text-[11px] text-white/40 font-medium">K</kbd>
+              <kbd className="inline-flex items-center justify-center min-w-[22px] h-[22px] px-1.5 rounded bg-[var(--kbd-bg)] text-[11px] text-[var(--text-subtle)] font-medium">⌘</kbd>
+              <kbd className="inline-flex items-center justify-center min-w-[22px] h-[22px] px-1.5 rounded bg-[var(--kbd-bg)] text-[11px] text-[var(--text-subtle)] font-medium">K</kbd>
             </button>
           </div>
         )}
