@@ -409,6 +409,9 @@ const SnippetManager: React.FC<SnippetManagerProps> = ({ onClose, initialView })
   const firstDynamicInputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const itemRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const isGlassyTheme =
+    document.documentElement.classList.contains('sc-glassy') ||
+    document.body.classList.contains('sc-glassy');
 
   const loadSnippets = useCallback(async () => {
     setIsLoading(true);
@@ -1105,12 +1108,21 @@ const SnippetManager: React.FC<SnippetManagerProps> = ({ onClose, initialView })
         >
           <div
             className="absolute bottom-12 right-3 w-80 max-h-[65vh] rounded-xl overflow-hidden flex flex-col shadow-2xl"
-            style={{
-              background: 'linear-gradient(160deg, rgba(var(--on-surface-rgb), 0.08), rgba(var(--on-surface-rgb), 0.01)), rgba(var(--surface-base-rgb), 0.42)',
-              backdropFilter: 'blur(96px) saturate(190%)',
-              WebkitBackdropFilter: 'blur(96px) saturate(190%)',
-              border: '1px solid rgba(var(--on-surface-rgb), 0.05)',
-            }}
+            style={
+              isGlassyTheme
+                ? {
+                    background: 'linear-gradient(160deg, rgba(var(--on-surface-rgb), 0.08), rgba(var(--on-surface-rgb), 0.01)), rgba(var(--surface-base-rgb), 0.42)',
+                    backdropFilter: 'blur(96px) saturate(190%)',
+                    WebkitBackdropFilter: 'blur(96px) saturate(190%)',
+                    border: '1px solid rgba(var(--on-surface-rgb), 0.05)',
+                  }
+                : {
+                    background: 'var(--card-bg)',
+                    backdropFilter: 'blur(40px)',
+                    WebkitBackdropFilter: 'blur(40px)',
+                    border: '1px solid var(--border-primary)',
+                  }
+            }
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex-1 overflow-y-auto py-1">

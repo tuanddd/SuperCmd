@@ -1818,6 +1818,9 @@ const App: React.FC = () => {
   }
 
   // ─── Launcher mode ──────────────────────────────────────────────
+  const isGlassyTheme =
+    document.documentElement.classList.contains('sc-glassy') ||
+    document.body.classList.contains('sc-glassy');
   return (
     <>
     {alwaysMountedRunners}
@@ -2059,13 +2062,22 @@ const App: React.FC = () => {
           className="absolute bottom-12 right-3 w-96 max-h-[65vh] rounded-xl overflow-hidden flex flex-col shadow-2xl outline-none focus:outline-none ring-0 focus:ring-0"
           tabIndex={0}
           onKeyDown={handleActionsOverlayKeyDown}
-          style={{
-            background:
-              'linear-gradient(160deg, rgba(var(--on-surface-rgb), 0.08), rgba(var(--on-surface-rgb), 0.01)), rgba(var(--surface-base-rgb), 0.42)',
-            backdropFilter: 'blur(96px) saturate(190%)',
-            WebkitBackdropFilter: 'blur(96px) saturate(190%)',
-            border: '1px solid rgba(var(--on-surface-rgb), 0.05)',
-          }}
+          style={
+            isGlassyTheme
+              ? {
+                  background:
+                    'linear-gradient(160deg, rgba(var(--on-surface-rgb), 0.08), rgba(var(--on-surface-rgb), 0.01)), rgba(var(--surface-base-rgb), 0.42)',
+                  backdropFilter: 'blur(96px) saturate(190%)',
+                  WebkitBackdropFilter: 'blur(96px) saturate(190%)',
+                  border: '1px solid rgba(var(--on-surface-rgb), 0.05)',
+                }
+              : {
+                  background: 'var(--card-bg)',
+                  backdropFilter: 'blur(40px)',
+                  WebkitBackdropFilter: 'blur(40px)',
+                  border: '1px solid var(--border-primary)',
+                }
+          }
           onClick={(e) => e.stopPropagation()}
         >
           <div className="flex-1 overflow-y-auto py-1">
@@ -2126,11 +2138,20 @@ const App: React.FC = () => {
           style={{
             left: Math.min(contextMenu.x, window.innerWidth - 340),
             top: Math.min(contextMenu.y, window.innerHeight - 320),
-            background:
-              'linear-gradient(160deg, rgba(var(--on-surface-rgb), 0.08), rgba(var(--on-surface-rgb), 0.01)), rgba(var(--surface-base-rgb), 0.42)',
-            backdropFilter: 'blur(96px) saturate(190%)',
-            WebkitBackdropFilter: 'blur(96px) saturate(190%)',
-            border: '1px solid rgba(var(--on-surface-rgb), 0.05)',
+            ...(isGlassyTheme
+              ? {
+                  background:
+                    'linear-gradient(160deg, rgba(var(--on-surface-rgb), 0.08), rgba(var(--on-surface-rgb), 0.01)), rgba(var(--surface-base-rgb), 0.42)',
+                  backdropFilter: 'blur(96px) saturate(190%)',
+                  WebkitBackdropFilter: 'blur(96px) saturate(190%)',
+                  border: '1px solid rgba(var(--on-surface-rgb), 0.05)',
+                }
+              : {
+                  background: 'var(--card-bg)',
+                  backdropFilter: 'blur(40px)',
+                  WebkitBackdropFilter: 'blur(40px)',
+                  border: '1px solid var(--border-primary)',
+                }),
           }}
           onClick={(e) => e.stopPropagation()}
           onContextMenu={(e) => e.preventDefault()}

@@ -454,9 +454,7 @@ html {
 /* Unified glass footer used by extension bottom action bars */
 .sc-glass-footer {
   border-top: 1px solid var(--footer-border);
-  background:
-    linear-gradient(180deg, rgba(var(--on-surface-rgb), 0.06), rgba(var(--on-surface-rgb), 0.03)),
-    var(--bg-secondary);
+  background: var(--card-bg);
   -webkit-backdrop-filter: blur(48px) saturate(170%);
   backdrop-filter: blur(48px) saturate(170%);
 }
@@ -577,6 +575,33 @@ html {
   white-space: pre-wrap;
   max-height: 52px;
   overflow: auto;
+}
+
+/* Action menu scrollbar: hidden until hover */
+.action-overlay-scroll {
+  scrollbar-color: transparent transparent;
+}
+
+.action-overlay-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.action-overlay-scroll::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-color: transparent;
+}
+
+.action-overlay-scroll:hover {
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+.action-overlay-scroll:hover::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-color: rgba(var(--backdrop-rgb), 0);
+}
+
+.action-overlay-scroll:hover::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
 }
 
 /* List area background - transparent to show glass */

@@ -132,6 +132,9 @@ const FileSearchExtension: React.FC<FileSearchExtensionProps> = ({ onClose }) =>
   const [isLoading, setIsLoading] = useState(false);
   const [showActions, setShowActions] = useState(false);
   const [selectedActionIndex, setSelectedActionIndex] = useState(0);
+  const isGlassyTheme =
+    document.documentElement.classList.contains('sc-glassy') ||
+    document.body.classList.contains('sc-glassy');
   const [iconsByPath, setIconsByPath] = useState<Record<string, string>>({});
   const [metadata, setMetadata] = useState<FileMetadata | null>(null);
   const [opening, setOpening] = useState(false);
@@ -577,13 +580,22 @@ const FileSearchExtension: React.FC<FileSearchExtensionProps> = ({ onClose }) =>
         <div className="absolute inset-0 bg-black/30 flex items-center justify-center" onClick={() => setShowActions(false)}>
           <div
             className="w-[430px] rounded-2xl border p-2"
-            style={{
-              background:
-                'linear-gradient(160deg, rgba(var(--on-surface-rgb), 0.08), rgba(var(--on-surface-rgb), 0.01)), rgba(var(--surface-base-rgb), 0.42)',
-              backdropFilter: 'blur(96px) saturate(190%)',
-              WebkitBackdropFilter: 'blur(96px) saturate(190%)',
-              borderColor: 'rgba(var(--on-surface-rgb), 0.05)',
-            }}
+            style={
+              isGlassyTheme
+                ? {
+                    background:
+                      'linear-gradient(160deg, rgba(var(--on-surface-rgb), 0.08), rgba(var(--on-surface-rgb), 0.01)), rgba(var(--surface-base-rgb), 0.42)',
+                    backdropFilter: 'blur(96px) saturate(190%)',
+                    WebkitBackdropFilter: 'blur(96px) saturate(190%)',
+                    borderColor: 'rgba(var(--on-surface-rgb), 0.05)',
+                  }
+                : {
+                    background: 'var(--card-bg)',
+                    backdropFilter: 'blur(40px)',
+                    WebkitBackdropFilter: 'blur(40px)',
+                    borderColor: 'var(--border-primary)',
+                  }
+            }
             onClick={(e) => e.stopPropagation()}
           >
             {selectedActions.length === 0 ? (
