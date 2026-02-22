@@ -43,6 +43,8 @@
   --onboarding-read-card-bg: linear-gradient(180deg, rgba(244, 245, 251, 0.94) 0%, rgba(236, 239, 247, 0.9) 100%);
   --onboarding-read-card-shadow: inset 0 1px 0 rgba(var(--on-surface-rgb), 0.12), 0 16px 40px rgba(var(--backdrop-rgb), 0.16);
   --onboarding-footer-bg: linear-gradient(180deg, rgba(242, 237, 244, 0.72) 0%, rgba(231, 236, 245, 0.84) 100%);
+  --onboarding-neutral-border: rgba(var(--on-surface-rgb), 0.16);
+  --onboarding-shell-outline: rgba(var(--on-surface-rgb), 0.12);
   --text-primary: rgba(var(--on-surface-rgb), 0.94);
   --text-secondary: rgba(var(--on-surface-rgb), 0.84);
   --text-muted: rgba(var(--on-surface-rgb), 0.72);
@@ -160,6 +162,8 @@
   --onboarding-read-card-bg: linear-gradient(180deg, rgba(22, 22, 28, 0.92) 0%, rgba(16, 16, 22, 0.88) 100%);
   --onboarding-read-card-shadow: inset 0 1px 0 rgba(var(--on-surface-rgb), 0.14), 0 16px 40px rgba(var(--backdrop-rgb), 0.38);
   --onboarding-footer-bg: linear-gradient(180deg, rgba(25, 20, 28, 0.56) 0%, rgba(11, 12, 17, 0.84) 100%);
+  --onboarding-neutral-border: rgba(var(--on-surface-rgb), 0.12);
+  --onboarding-shell-outline: rgba(var(--on-surface-rgb), 0.10);
   --text-primary: rgba(var(--on-surface-rgb), 0.92);
   --text-secondary: rgba(var(--on-surface-rgb), 0.74);
   --text-muted: rgba(var(--on-surface-rgb), 0.5);
@@ -418,6 +422,15 @@ html {
 
 .sc-glassy .glass-effect::after {
   border: 1px solid rgba(var(--on-surface-rgb), 0.24);
+}
+
+/* Onboarding-only border softening (prevents solid dark/white strokes on utility borders) */
+.onboarding-flow [class*="border-white"] {
+  border-color: var(--onboarding-neutral-border);
+}
+
+.onboarding-flow .glass-effect::after {
+  border-color: var(--onboarding-shell-outline);
 }
 
 .sc-glassy .sc-glass-footer {
