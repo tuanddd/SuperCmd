@@ -2059,11 +2059,11 @@ const App: React.FC = () => {
       >
         <div
           ref={actionsOverlayRef}
-          className="absolute bottom-12 right-3 w-96 max-h-[65vh] rounded-xl overflow-hidden flex flex-col shadow-2xl outline-none focus:outline-none ring-0 focus:ring-0"
+          className="absolute bottom-12 right-3 w-96 max-h-[65vh] rounded-xl overflow-hidden flex flex-col shadow-2xl outline-none focus:outline-none focus-visible:outline-none ring-0 focus:ring-0 focus-visible:ring-0"
           tabIndex={0}
           onKeyDown={handleActionsOverlayKeyDown}
-          style={
-            isGlassyTheme
+          style={{
+            ...(isGlassyTheme
               ? {
                   background:
                     'linear-gradient(160deg, rgba(var(--on-surface-rgb), 0.08), rgba(var(--on-surface-rgb), 0.01)), rgba(var(--surface-base-rgb), 0.42)',
@@ -2076,8 +2076,12 @@ const App: React.FC = () => {
                   backdropFilter: 'blur(40px)',
                   WebkitBackdropFilter: 'blur(40px)',
                   border: '1px solid var(--border-primary)',
-                }
-          }
+                }),
+            outline: 'none',
+          }}
+          onFocus={(e) => {
+            (e.currentTarget as HTMLDivElement).style.outline = 'none';
+          }}
           onClick={(e) => e.stopPropagation()}
         >
           <div className="flex-1 overflow-y-auto py-1">
@@ -2132,7 +2136,7 @@ const App: React.FC = () => {
       >
         <div
           ref={contextMenuRef}
-          className="absolute w-80 max-h-[60vh] rounded-xl overflow-hidden flex flex-col shadow-2xl outline-none focus:outline-none ring-0 focus:ring-0"
+          className="absolute w-80 max-h-[60vh] rounded-xl overflow-hidden flex flex-col shadow-2xl outline-none focus:outline-none focus-visible:outline-none ring-0 focus:ring-0 focus-visible:ring-0"
           tabIndex={0}
           onKeyDown={handleContextMenuKeyDown}
           style={{
@@ -2152,6 +2156,10 @@ const App: React.FC = () => {
                   WebkitBackdropFilter: 'blur(40px)',
                   border: '1px solid var(--border-primary)',
                 }),
+            outline: 'none',
+          }}
+          onFocus={(e) => {
+            (e.currentTarget as HTMLDivElement).style.outline = 'none';
           }}
           onClick={(e) => e.stopPropagation()}
           onContextMenu={(e) => e.preventDefault()}

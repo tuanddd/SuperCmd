@@ -528,7 +528,7 @@ const ClipboardManager: React.FC<ClipboardManagerProps> = ({ onClose }) => {
         >
           <div
             ref={actionsOverlayRef}
-            className="absolute bottom-12 right-3 w-80 max-h-[65vh] rounded-xl overflow-hidden flex flex-col shadow-2xl"
+            className="absolute bottom-12 right-3 w-80 max-h-[65vh] rounded-xl overflow-hidden flex flex-col shadow-2xl outline-none focus:outline-none focus-visible:outline-none ring-0 focus:ring-0 focus-visible:ring-0"
             tabIndex={0}
             style={
               isGlassyTheme
@@ -545,6 +545,9 @@ const ClipboardManager: React.FC<ClipboardManagerProps> = ({ onClose }) => {
                     border: '1px solid var(--border-primary)',
                   }
             }
+            onFocus={(e) => {
+              (e.currentTarget as HTMLDivElement).style.outline = 'none';
+            }}
             onClick={e => e.stopPropagation()}
           >
             <div className="flex-1 overflow-y-auto py-1">

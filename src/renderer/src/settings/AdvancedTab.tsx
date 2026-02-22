@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Palette, Bug } from 'lucide-react';
+import { Bug } from 'lucide-react';
 import type { AppSettings } from '../../types/electron';
-import { applyBaseColor, normalizeBaseColorHex } from '../utils/base-color';
 
 type SettingsRowProps = {
   icon: React.ReactNode;
@@ -40,26 +39,12 @@ const AdvancedTab: React.FC = () => {
   useEffect(() => {
     window.electron.getSettings().then((next) => {
       setSettings(next);
-      applyBaseColor(next.baseColor || '#101113');
     });
   }, []);
 
   if (!settings) {
     return <div className="p-6 text-[var(--text-muted)] text-[12px]">Loading advanced settings...</div>;
   }
-
-  const handleBaseColorPreview = (value: string) => {
-    const normalized = normalizeBaseColorHex(value);
-    setSettings((prev) => (prev ? { ...prev, baseColor: normalized } : prev));
-    applyBaseColor(normalized);
-  };
-
-  const handleBaseColorCommit = async (value: string) => {
-    const normalized = normalizeBaseColorHex(value);
-    handleBaseColorPreview(normalized);
-    const updated = await window.electron.saveSettings({ baseColor: normalized });
-    setSettings(updated);
-  };
 
   return (
     <div className="w-full max-w-[980px] mx-auto space-y-3">
@@ -146,30 +131,6 @@ const AdvancedTab: React.FC = () => {
             />
             Enable debug mode
           </label>
-        </SettingsRow>
-
-        <SettingsRow
-          icon={<Palette className="w-4 h-4" />}
-          title="Base Color"
-          description="Changes only the core glass base color. Preview updates live while you drag."
-          withBorder={false}
-        >
-          <div className="flex items-center gap-3">
-            <input
-              type="color"
-              value={normalizeBaseColorHex(settings.baseColor || '#101113')}
-              onInput={(e) => handleBaseColorPreview((e.target as HTMLInputElement).value)}
-              onChange={(e) => { void handleBaseColorCommit((e.target as HTMLInputElement).value); }}
-              className="settings-color-input w-12 h-8 rounded border border-[var(--ui-divider)] bg-transparent cursor-pointer"
-            />
-            <input
-              type="text"
-              value={normalizeBaseColorHex(settings.baseColor || '#101113')}
-              onChange={(e) => handleBaseColorPreview(e.target.value)}
-              onBlur={(e) => { void handleBaseColorCommit(e.target.value); }}
-              className="w-28 bg-[var(--ui-segment-bg)] border border-[var(--ui-divider)] rounded-md px-2.5 py-1.5 text-xs text-white/90 outline-none"
-            />
-          </div>
         </SettingsRow>
       </div>
     </div>
