@@ -921,6 +921,60 @@ body.sc-detached-window .whisper-shortcut-hint {
   animation: whisper-spin 0.85s linear infinite;
 }
 
+.sc-glassy .whisper-wave {
+  background:
+    linear-gradient(180deg, rgba(var(--on-surface-rgb), 0.08), rgba(var(--on-surface-rgb), 0.02)),
+    rgba(var(--surface-base-rgb), 0.28);
+  border: 1px solid rgba(var(--on-surface-rgb), 0.28);
+  backdrop-filter: blur(92px) saturate(190%);
+  -webkit-backdrop-filter: blur(92px) saturate(190%);
+}
+
+.sc-glassy .whisper-wave-standalone {
+  border-color: rgba(var(--on-surface-rgb), 0.36);
+  background:
+    radial-gradient(130% 130% at 100% 0%, rgba(78, 162, 255, 0.18), transparent 56%),
+    radial-gradient(120% 120% at 0% 100%, rgba(72, 199, 142, 0.15), transparent 58%),
+    linear-gradient(180deg, rgba(var(--on-surface-rgb), 0.08), rgba(var(--on-surface-rgb), 0.02)),
+    rgba(var(--surface-base-rgb), 0.24);
+  backdrop-filter: blur(96px) saturate(195%);
+  -webkit-backdrop-filter: blur(96px) saturate(195%);
+}
+
+.sc-glassy .whisper-wave.is-listening {
+  border-color: rgba(var(--on-surface-rgb), 0.44);
+}
+
+.sc-glassy .whisper-wave.is-processing {
+  border-color: rgba(var(--on-surface-rgb), 0.38);
+}
+
+.sc-glassy .whisper-side-button {
+  border-color: rgba(var(--on-surface-rgb), 0.28);
+  background:
+    linear-gradient(180deg, rgba(var(--on-surface-rgb), 0.09), rgba(var(--on-surface-rgb), 0.03)),
+    rgba(var(--surface-base-rgb), 0.3);
+  color: var(--text-primary);
+  backdrop-filter: blur(84px) saturate(190%);
+  -webkit-backdrop-filter: blur(84px) saturate(190%);
+}
+
+.sc-glassy .whisper-side-button:hover {
+  border-color: rgba(var(--on-surface-rgb), 0.36);
+  background:
+    linear-gradient(180deg, rgba(var(--on-surface-rgb), 0.12), rgba(var(--on-surface-rgb), 0.04)),
+    rgba(var(--surface-base-rgb), 0.36);
+}
+
+.sc-glassy .whisper-coachmark-inline {
+  border-color: rgba(var(--on-surface-rgb), 0.28);
+  background:
+    linear-gradient(180deg, rgba(var(--on-surface-rgb), 0.1), rgba(var(--on-surface-rgb), 0.03)),
+    rgba(var(--surface-base-rgb), 0.24);
+  backdrop-filter: blur(82px) saturate(185%);
+  -webkit-backdrop-filter: blur(82px) saturate(185%);
+}
+
 @keyframes whisper-spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
