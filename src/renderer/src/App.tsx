@@ -44,6 +44,7 @@ import {
 } from './utils/extension-preferences';
 import { applyAppFontSize, getDefaultAppFontSize } from './utils/font-size';
 import { refreshThemeFromStorage } from './utils/theme';
+import { applyUiStyle } from './utils/ui-style';
 import ScriptCommandSetupView from './views/ScriptCommandSetupView';
 import ScriptCommandOutputView from './views/ScriptCommandOutputView';
 import ExtensionPreferenceSetupView from './views/ExtensionPreferenceSetupView';
@@ -215,6 +216,7 @@ const App: React.FC = () => {
       setConfiguredEdgeTtsVoice(String(settings.ai?.edgeTtsVoice || 'en-US-EricNeural'));
       setConfiguredTtsModel(String(settings.ai?.textToSpeechModel || 'edge-tts'));
       applyAppFontSize(settings.fontSize);
+      applyUiStyle(settings.uiStyle || 'default');
       applyBaseColor(settings.baseColor || '#101113');
       const shouldShowOnboarding = !settings.hasSeenOnboarding;
       setShowOnboarding(shouldShowOnboarding);
@@ -228,6 +230,7 @@ const App: React.FC = () => {
       setConfiguredEdgeTtsVoice('en-US-EricNeural');
       setConfiguredTtsModel('edge-tts');
       applyAppFontSize(getDefaultAppFontSize());
+      applyUiStyle('default');
       applyBaseColor('#101113');
       setShowOnboarding(false);
       setOnboardingRequiresShortcutFix(false);
@@ -434,6 +437,7 @@ const App: React.FC = () => {
   useEffect(() => {
     const cleanup = window.electron.onSettingsUpdated?.((settings: AppSettings) => {
       applyAppFontSize(settings.fontSize);
+      applyUiStyle(settings.uiStyle || 'default');
       applyBaseColor(settings.baseColor || '#101113');
       setLauncherShortcut(settings.globalShortcut || 'Alt+Space');
     });

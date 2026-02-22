@@ -12,6 +12,7 @@ import AITab from './settings/AITab';
 import ExtensionsTab from './settings/ExtensionsTab';
 import { applyAppFontSize, getDefaultAppFontSize } from './utils/font-size';
 import { applyBaseColor } from './utils/base-color';
+import { applyUiStyle } from './utils/ui-style';
 import AdvancedTab from './settings/AdvancedTab';
 
 type Tab = 'general' | 'ai' | 'extensions' | 'advanced';
@@ -112,11 +113,15 @@ const SettingsApp: React.FC = () => {
       .then((settings) => {
         if (!disposed) {
           applyAppFontSize(settings.fontSize);
+          applyUiStyle(settings.uiStyle || 'default');
           applyBaseColor(settings.baseColor || '#101113');
         }
       })
       .catch(() => {
-        if (!disposed) applyAppFontSize(getDefaultAppFontSize());
+        if (!disposed) {
+          applyAppFontSize(getDefaultAppFontSize());
+          applyUiStyle('default');
+        }
       });
     return () => {
       disposed = true;
@@ -126,6 +131,7 @@ const SettingsApp: React.FC = () => {
   useEffect(() => {
     const cleanup = window.electron.onSettingsUpdated?.((settings) => {
       applyAppFontSize(settings.fontSize);
+      applyUiStyle(settings.uiStyle || 'default');
       applyBaseColor(settings.baseColor || '#101113');
     });
     return cleanup;

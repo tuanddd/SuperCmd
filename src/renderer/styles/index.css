@@ -230,6 +230,42 @@
   --toast-fg: rgba(255, 255, 255, 0.9);
 }
 
+.sc-glassy {
+  --bg-secondary: rgba(255, 255, 255, 0.12);
+  --card-bg: rgba(255, 255, 255, 0.12);
+  --input-bg: rgba(255, 255, 255, 0.18);
+  --menu-overlay-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.08));
+  --settings-panel-bg: rgba(255, 255, 255, 0.12);
+  --settings-shell-bg: rgba(255, 255, 255, 0.08);
+  --ui-divider: rgba(156, 164, 178, 0.32);
+  --ui-panel-border: rgba(156, 164, 178, 0.38);
+  --ui-segment-border: rgba(156, 164, 178, 0.4);
+  --ui-segment-bg: rgba(255, 255, 255, 0.22);
+  --ui-segment-active-bg: rgba(118, 130, 149, 0.3);
+  --ui-segment-hover-bg: rgba(118, 130, 149, 0.2);
+  --launcher-card-bg: rgba(118, 130, 149, 0.14);
+  --launcher-card-hover-bg: rgba(118, 130, 149, 0.2);
+  --launcher-card-selected-bg: rgba(118, 130, 149, 0.28);
+}
+
+.dark.sc-glassy {
+  --bg-secondary: rgba(22, 24, 30, 0.14);
+  --card-bg: rgba(22, 24, 30, 0.14);
+  --input-bg: rgba(22, 24, 30, 0.22);
+  --menu-overlay-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.05));
+  --settings-panel-bg: rgba(18, 20, 24, 0.2);
+  --settings-shell-bg: rgba(16, 18, 22, 0.12);
+  --ui-divider: rgba(255, 255, 255, 0.16);
+  --ui-panel-border: rgba(255, 255, 255, 0.2);
+  --ui-segment-border: rgba(255, 255, 255, 0.22);
+  --ui-segment-bg: rgba(255, 255, 255, 0.12);
+  --ui-segment-active-bg: rgba(255, 255, 255, 0.2);
+  --ui-segment-hover-bg: rgba(255, 255, 255, 0.16);
+  --launcher-card-bg: rgba(255, 255, 255, 0.12);
+  --launcher-card-hover-bg: rgba(255, 255, 255, 0.18);
+  --launcher-card-selected-bg: rgba(255, 255, 255, 0.24);
+}
+
 html.sc-theme-animating *,
 html.sc-theme-animating *::before,
 html.sc-theme-animating *::after {
@@ -316,6 +352,41 @@ select {
   border: 1px solid var(--glass-outline);
   pointer-events: none;
 }
+
+.sc-glassy .glass-effect {
+  background:
+    linear-gradient(160deg, rgba(var(--on-surface-rgb), 0.08), rgba(var(--on-surface-rgb), 0.01)),
+    rgba(var(--surface-base-rgb), 0.5);
+  -webkit-backdrop-filter: blur(96px) saturate(190%);
+  backdrop-filter: blur(96px) saturate(190%);
+  border-radius: 22px;
+}
+
+.sc-glassy .glass-effect::after {
+  inset: 1px;
+  border-radius: 21px;
+  border: 1px solid rgba(var(--on-surface-rgb), 0.24);
+}
+
+.sc-glassy .sc-glass-footer {
+  background:
+    linear-gradient(180deg, rgba(var(--on-surface-rgb), 0.08), rgba(var(--on-surface-rgb), 0.02)),
+    rgba(var(--surface-base-rgb), 0.36);
+  -webkit-backdrop-filter: blur(92px) saturate(185%);
+  backdrop-filter: blur(92px) saturate(185%);
+}
+
+.sc-glassy .cursor-prompt-surface {
+  background: rgba(var(--surface-base-rgb), 0.26);
+  -webkit-backdrop-filter: blur(96px) saturate(190%);
+  backdrop-filter: blur(96px) saturate(190%);
+  border-color: rgba(var(--on-surface-rgb), 0.22);
+}
+
+.sc-glassy .rounded-md { border-radius: 12px !important; }
+.sc-glassy .rounded-lg { border-radius: 16px !important; }
+.sc-glassy .rounded-xl { border-radius: 22px !important; }
+.sc-glassy .rounded-2xl { border-radius: 26px !important; }
 
 /* Unified glass footer used by extension bottom action bars */
 .sc-glass-footer {

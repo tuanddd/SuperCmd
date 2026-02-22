@@ -5,7 +5,7 @@
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Keyboard, Info, RefreshCw, Download, RotateCcw, Type, Sun, Moon, SunMoon } from 'lucide-react';
+import { Keyboard, Info, RefreshCw, Download, RotateCcw, Type, Sun, Moon, SunMoon, Sparkles } from 'lucide-react';
 import HotkeyRecorder from './HotkeyRecorder';
 import type { AppSettings, AppUpdaterStatus } from '../../types/electron';
 import { applyAppFontSize, getDefaultAppFontSize } from '../utils/font-size';
@@ -15,6 +15,7 @@ import {
   setThemePreference as applyThemePreference,
   type ThemePreference,
 } from '../utils/theme';
+import { applyUiStyle, normalizeUiStyle, type UiStylePreference } from '../utils/ui-style';
 
 type FontSizeOption = NonNullable<AppSettings['fontSize']>;
 
@@ -71,6 +72,7 @@ const GeneralTab: React.FC = () => {
   const [updaterActionError, setUpdaterActionError] = useState('');
   const [shortcutStatus, setShortcutStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [themePreference, setThemePreference] = useState<ThemePreference>(() => getThemePreference());
+  const [uiStyle, setUiStyle] = useState<UiStylePreference>('default');
 
   useEffect(() => {
     window.electron.getSettings().then((nextSettings) => {
@@ -80,7 +82,15 @@ const GeneralTab: React.FC = () => {
         ...nextSettings,
         fontSize: normalizedFontSize,
       });
+      setUiStyle(normalizeUiStyle(nextSettings.uiStyle));
     });
+  }, []);
+
+  useEffect(() => {
+    const cleanup = window.electron.onSettingsUpdated?.((nextSettings) => {
+      setUiStyle(normalizeUiStyle(nextSettings.uiStyle));
+    });
+    return cleanup;
   }, []);
 
   useEffect(() => {
@@ -203,6 +213,22 @@ const GeneralTab: React.FC = () => {
     applyThemePreference(nextTheme);
   };
 
+  const handleUiStyleChange = async (nextStyle: UiStylePreference) => {
+    if (!settings) return;
+    const previousStyle = normalizeUiStyle(settings.uiStyle);
+    if (previousStyle === nextStyle) return;
+    setUiStyle(nextStyle);
+    setSettings((prev) => (prev ? { ...prev, uiStyle: nextStyle } : prev));
+    applyUiStyle(nextStyle);
+    try {
+      await window.electron.saveSettings({ uiStyle: nextStyle });
+    } catch {
+      setUiStyle(previousStyle);
+      setSettings((prev) => (prev ? { ...prev, uiStyle: previousStyle } : prev));
+      applyUiStyle(previousStyle);
+    }
+  };
+
   if (!settings) {
     return <div className="p-6 text-[var(--text-muted)] text-[12px]">Loading settings...</div>;
   }
@@ -278,6 +304,35 @@ const GeneralTab: React.FC = () => {
                   }`}
                 >
                   {option.icon}
+                  {option.label}
+                </button>
+              );
+            })}
+          </div>
+        </SettingsRow>
+
+        <SettingsRow
+          icon={<Sparkles className="w-4 h-4" />}
+          title="Visual Style"
+          description="Use Default look or enable a glassy macOS Tahoe-inspired style."
+        >
+          <div className="inline-flex items-center gap-0.5 rounded-lg border border-[var(--ui-divider)] bg-[var(--ui-segment-bg)] p-0.5">
+            {([
+              { id: 'default', label: 'Default' },
+              { id: 'glassy', label: 'Glassy' },
+            ] as Array<{ id: UiStylePreference; label: string }>).map((option) => {
+              const active = uiStyle === option.id;
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() => void handleUiStyleChange(option.id)}
+                  className={`px-3 py-1.5 rounded-md text-[12px] font-semibold transition-colors ${
+                    active
+                      ? 'bg-[var(--ui-segment-active-bg)] text-[var(--text-primary)]'
+                      : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--ui-segment-hover-bg)]'
+                  }`}
+                >
                   {option.label}
                 </button>
               );
