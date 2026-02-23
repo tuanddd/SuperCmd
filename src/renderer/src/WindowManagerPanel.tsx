@@ -366,6 +366,19 @@ function sortWindowsForLayout(windows: ManagedWindow[]): ManagedWindow[] {
 }
 
 function buildAutoLayout(windows: ManagedWindow[], area: { left: number; top: number; width: number; height: number }): LayoutMove[] {
+  if (windows.length === 2) {
+    const split = splitVertical(area);
+    return [
+      { id: windows[0].id, bounds: rectToBounds(split.left) },
+      { id: windows[1].id, bounds: rectToBounds(split.right) },
+    ];
+  }
+  if (windows.length === 3) {
+    return buildAutoFill3Layout(windows, area);
+  }
+  if (windows.length === 4) {
+    return buildAutoFill4Layout(windows, area);
+  }
   const rects = computeGridRects(
     windows.length,
     { x: area.left, y: area.top, width: area.width, height: area.height },
@@ -374,17 +387,97 @@ function buildAutoLayout(windows: ManagedWindow[], area: { left: number; top: nu
   return windows.map((win, index) => ({ id: win.id, bounds: rectToBounds(rects[index]) }));
 }
 
-function buildFixedGridLayout(
-  windows: ManagedWindow[],
-  area: { left: number; top: number; width: number; height: number },
-  cols: number
-): LayoutMove[] {
-  const rects = computeGridRects(
-    windows.length,
-    { x: area.left, y: area.top, width: area.width, height: area.height },
-    { padding: 0, gap: 0, cols }
+function buildAutoFill3Layout(windows: ManagedWindow[], area: ScreenArea): LayoutMove[] {
+  const targets = windows.slice(0, 3);
+  if (targets.length === 0) return [];
+  if (targets.length === 1) {
+    return [{ id: targets[0].id, bounds: rectToBounds({ x: area.left, y: area.top, width: area.width, height: area.height }) }];
+  }
+  if (targets.length === 2) {
+    const split = splitVertical(area);
+    return [
+      { id: targets[0].id, bounds: rectToBounds(split.left) },
+      { id: targets[1].id, bounds: rectToBounds(split.right) },
+    ];
+  }
+
+  const leftW = Math.max(1, Math.floor(area.width / 2));
+  const rightW = Math.max(1, area.width - leftW);
+
+  const minTop = Math.max(1, Math.round(targets[1]?.bounds?.size?.height || 0));
+  const minBottom = Math.max(1, Math.round(targets[2]?.bounds?.size?.height || 0));
+  const maxTop = Math.max(1, area.height - minBottom);
+  const topH = Math.max(1, Math.min(Math.max(Math.floor(area.height / 2), minTop), maxTop));
+  const bottomH = Math.max(1, area.height - topH);
+
+  return [
+    {
+      id: targets[0].id,
+      bounds: rectToBounds({ x: area.left, y: area.top, width: leftW, height: area.height }),
+    },
+    {
+      id: targets[1].id,
+      bounds: rectToBounds({ x: area.left + leftW, y: area.top, width: rightW, height: topH }),
+    },
+    {
+      id: targets[2].id,
+      bounds: rectToBounds({ x: area.left + leftW, y: area.top + topH, width: rightW, height: bottomH }),
+    },
+  ];
+}
+
+function buildAutoFill4Layout(windows: ManagedWindow[], area: ScreenArea): LayoutMove[] {
+  const targets = windows.slice(0, 4);
+  if (targets.length === 0) return [];
+  if (targets.length <= 2) {
+    return buildAutoFill3Layout(targets, area);
+  }
+  if (targets.length === 3) {
+    return buildAutoFill3Layout(targets, area);
+  }
+
+  const minLeftW = Math.max(
+    1,
+    Math.round(Math.max(targets[0]?.bounds?.size?.width || 0, targets[2]?.bounds?.size?.width || 0))
   );
-  return windows.map((win, index) => ({ id: win.id, bounds: rectToBounds(rects[index]) }));
+  const minRightW = Math.max(
+    1,
+    Math.round(Math.max(targets[1]?.bounds?.size?.width || 0, targets[3]?.bounds?.size?.width || 0))
+  );
+  const maxLeft = Math.max(1, area.width - minRightW);
+  const leftW = Math.max(1, Math.min(Math.max(Math.floor(area.width / 2), minLeftW), maxLeft));
+  const rightW = Math.max(1, area.width - leftW);
+
+  const minTopH = Math.max(
+    1,
+    Math.round(Math.max(targets[0]?.bounds?.size?.height || 0, targets[1]?.bounds?.size?.height || 0))
+  );
+  const minBottomH = Math.max(
+    1,
+    Math.round(Math.max(targets[2]?.bounds?.size?.height || 0, targets[3]?.bounds?.size?.height || 0))
+  );
+  const maxTop = Math.max(1, area.height - minBottomH);
+  const topH = Math.max(1, Math.min(Math.max(Math.floor(area.height / 2), minTopH), maxTop));
+  const bottomH = Math.max(1, area.height - topH);
+
+  return [
+    {
+      id: targets[0].id,
+      bounds: rectToBounds({ x: area.left, y: area.top, width: leftW, height: topH }),
+    },
+    {
+      id: targets[1].id,
+      bounds: rectToBounds({ x: area.left + leftW, y: area.top, width: rightW, height: topH }),
+    },
+    {
+      id: targets[2].id,
+      bounds: rectToBounds({ x: area.left, y: area.top + topH, width: leftW, height: bottomH }),
+    },
+    {
+      id: targets[3].id,
+      bounds: rectToBounds({ x: area.left + leftW, y: area.top + topH, width: rightW, height: bottomH }),
+    },
+  ];
 }
 
 const WindowManagerPanel: React.FC<WindowManagerPanelProps> = ({ show, portalTarget, onClose }) => {
@@ -521,17 +614,27 @@ const WindowManagerPanel: React.FC<WindowManagerPanelProps> = ({ show, portalTar
       return;
     }
 
-    const previewKey = `${presetId}:${layoutWindows.map((w) => w.id).join(',')}`;
+    const sortedAll = sortWindowsForLayout(layoutWindows);
+    const isAutoFill3 = presetId === 'auto-fill-3';
+    const isAutoFill4 = presetId === 'auto-fill-4';
+    const sorted = isAutoFill3
+      ? sortedAll.slice(0, 3)
+      : isAutoFill4
+        ? sortedAll.slice(0, 4)
+        : sortedAll;
+    const previewIds = sorted.map((w) => w.id);
+    const previewKey = `${presetId}:${previewIds.join(',')}`;
     if (!options?.force && lastPreviewKeyRef.current === previewKey) return;
     lastPreviewKeyRef.current = previewKey;
-
-    const sorted = sortWindowsForLayout(layoutWindows);
     let moves: LayoutMove[] = [];
+    let movedCount = sorted.length;
     if (isMultiWindow) {
-      if (presetId === 'auto-fill-3') {
-        moves = buildFixedGridLayout(sorted, layoutArea, 3);
-      } else if (presetId === 'auto-fill-4') {
-        moves = buildFixedGridLayout(sorted, layoutArea, 4);
+      if (isAutoFill3) {
+        moves = buildAutoFill3Layout(sorted, layoutArea);
+        movedCount = Math.min(sorted.length, 3);
+      } else if (isAutoFill4) {
+        moves = buildAutoFill4Layout(sorted, layoutArea);
+        movedCount = Math.min(sorted.length, 4);
       } else {
         moves = buildAutoLayout(sorted, layoutArea);
       }
@@ -539,6 +642,7 @@ const WindowManagerPanel: React.FC<WindowManagerPanelProps> = ({ show, portalTar
       const region = getPresetRegion(presetId, layoutArea);
       if (region && target) {
         moves = [{ id: target.id, bounds: rectToBounds(region) }];
+        movedCount = 1;
       }
     }
 
@@ -553,14 +657,19 @@ const WindowManagerPanel: React.FC<WindowManagerPanelProps> = ({ show, portalTar
       if (seq !== previewSeqRef.current) return;
       setAppliedPreset(presetId);
       if (isMultiWindow) {
-        const colsOverride = presetId === 'auto-fill-3' ? 3 : presetId === 'auto-fill-4' ? 4 : null;
-        const cols = colsOverride ?? computeGridDimensions(sorted.length, {
-          x: layoutArea.left,
-          y: layoutArea.top,
-          width: layoutArea.width,
-          height: layoutArea.height,
-        }).cols;
-        setStatusText(`Previewing grid (${cols} col${cols > 1 ? 's' : ''}) for ${sorted.length} windows.`);
+        if (isAutoFill3) {
+          setStatusText(`Previewing Auto fill 3 for ${movedCount} of ${sortedAll.length} windows.`);
+        } else if (isAutoFill4) {
+          setStatusText(`Previewing Auto fill 4 for ${movedCount} of ${sortedAll.length} windows.`);
+        } else {
+          const cols = computeGridDimensions(sortedAll.length, {
+            x: layoutArea.left,
+            y: layoutArea.top,
+            width: layoutArea.width,
+            height: layoutArea.height,
+          }).cols;
+          setStatusText(`Previewing grid (${cols} col${cols > 1 ? 's' : ''}) for ${sortedAll.length} windows.`);
+        }
       } else {
         setStatusText(`Previewing ${PRESETS.find((p) => p.id === presetId)?.label} layout for ${sorted.length} windows.`);
       }
