@@ -178,12 +178,31 @@ function applyLiquidGlassToWindowManagerPopup(win: any): void {
     return;
   }
 
-  const applyEffect = () => {
+  const applyEffect = async () => {
     try {
+      let isDarkTheme = true;
+      try {
+        if (win?.webContents && !win.webContents.isDestroyed() && typeof win.webContents.executeJavaScript === 'function') {
+          const result = await win.webContents.executeJavaScript(
+            `(() => {
+              try {
+                const pref = String(window.localStorage.getItem('sc-theme-preference') || '').trim().toLowerCase();
+                if (pref === 'dark') return true;
+                if (pref === 'light') return false;
+              } catch {}
+              return document.documentElement.classList.contains('dark') || document.body.classList.contains('dark');
+            })()`,
+            true
+          );
+          isDarkTheme = Boolean(result);
+        }
+      } catch {}
+
       const glassId = liquidGlass.addView(win.getNativeWindowHandle(), {
         cornerRadius: 20,
         opaque: false,
-        tintColor: '#1e1e2208',
+        // Keep native liquid glass in sync with the app theme (not just macOS appearance).
+        tintColor: isDarkTheme ? '#16181fd0' : '#f4f6f8b0',
       });
       if (typeof glassId === 'number' && glassId >= 0 && typeof liquidGlass.unstable_setSubdued === 'function') {
         try { liquidGlass.unstable_setSubdued(glassId, 0); } catch {}
@@ -197,15 +216,15 @@ function applyLiquidGlassToWindowManagerPopup(win: any): void {
   try {
     if (win?.webContents && !win.webContents.isDestroyed()) {
       if (typeof win.webContents.isLoadingMainFrame === 'function' && !win.webContents.isLoadingMainFrame()) {
-        applyEffect();
+        void applyEffect();
       } else {
-        win.webContents.once('did-finish-load', applyEffect);
+        win.webContents.once('did-finish-load', () => { void applyEffect(); });
       }
       return;
     }
   } catch {}
 
-  applyEffect();
+  void applyEffect();
 }
 
 function ensureWindowManagerAccess(): void {
