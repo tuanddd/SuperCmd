@@ -1188,17 +1188,6 @@ const WindowManagerPanel: React.FC<WindowManagerPanelProps> = ({ show, portalTar
               role="listbox"
               tabIndex={0}
               aria-label="Window management presets"
-              onWheel={(event) => {
-                event.preventDefault();
-                const delta = event.deltaY || 0;
-                if (!delta) return;
-                const nextIndex = selectedIndex < 0
-                  ? (delta > 0 ? 0 : PRESETS.length - 1)
-                  : (selectedIndex + (delta > 0 ? 1 : -1) + PRESETS.length) % PRESETS.length;
-                setSelectedIndex(nextIndex);
-                const preset = PRESETS[nextIndex];
-                if (preset) queuePreview(preset.id);
-              }}
               style={{
                 flex: 1,
                 overflowY: 'auto',
