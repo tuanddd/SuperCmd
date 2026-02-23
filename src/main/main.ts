@@ -102,6 +102,7 @@ type NodeWindowInfo = {
 let cachedWindowManagerApi: any | null = null;
 let windowManagerAccessRequested = false;
 let windowManagementTargetWindowId: string | null = null;
+let windowManagementTargetWorkArea: { x: number; y: number; width: number; height: number } | null = null;
 
 function getWindowManagerApi(): any | null {
   if (cachedWindowManagerApi) return cachedWindowManagerApi;
@@ -222,6 +223,13 @@ function captureWindowManagementTargetWindow(): void {
     if (info?.id) {
       windowManagementTargetWindowId = String(info.id);
     }
+    const { screen: electronScreen } = require('electron');
+    const bounds = info?.bounds;
+    const point = bounds
+      ? { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 }
+      : electronScreen.getCursorScreenPoint();
+    const display = electronScreen.getDisplayNearestPoint(point);
+    windowManagementTargetWorkArea = display?.workArea || null;
   } catch (error) {
     console.warn('[WindowManager] Failed to capture target window:', error);
   }
@@ -8887,6 +8895,20 @@ return appURL's |path|() as text`,
     } catch (error) {
       console.error('Failed to get target window:', error);
       return null;
+    }
+  });
+
+  ipcMain.handle('window-management-get-context', async () => {
+    try {
+      const snapshot = getNodeSnapshot();
+      const target = snapshot.target ? toWindowManagementWindowFromNode(snapshot.target, true) : null;
+      const { screen: electronScreen } = require('electron');
+      const fallbackDisplay = electronScreen.getDisplayNearestPoint(electronScreen.getCursorScreenPoint());
+      const workArea = windowManagementTargetWorkArea || fallbackDisplay?.workArea || null;
+      return { target, workArea };
+    } catch (error) {
+      console.error('Failed to get window management context:', error);
+      return { target: null, workArea: null };
     }
   });
 

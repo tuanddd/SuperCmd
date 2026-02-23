@@ -307,6 +307,7 @@ export interface ElectronAPI {
   // Window Management
   getActiveWindow: () => Promise<any>;
   getWindowManagementTargetWindow: () => Promise<any>;
+  getWindowManagementContext: () => Promise<any>;
   getWindowsOnActiveDesktop: () => Promise<any[]>;
   getDesktops: () => Promise<any[]>;
   setWindowBounds: (options: any) => Promise<void>;

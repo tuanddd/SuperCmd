@@ -15,9 +15,23 @@ type ManagedWindow = {
   resizable?: boolean;
 };
 
-type PresetId = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'auto-organize';
+type PresetId =
+  | 'top-left'
+  | 'top-right'
+  | 'bottom-left'
+  | 'bottom-right'
+  | 'left'
+  | 'right'
+  | 'top'
+  | 'bottom'
+  | 'fill'
+  | 'fill-80'
+  | 'auto-organize'
+  | 'auto-fill-3'
+  | 'auto-fill-4';
 
 type Rect = { x: number; y: number; width: number; height: number };
+type ScreenArea = { left: number; top: number; width: number; height: number };
 
 type LayoutMove = { id: string; bounds: BoundsRect };
 
@@ -28,14 +42,111 @@ interface WindowManagerPanelProps {
 }
 
 const PRESETS: Array<{ id: PresetId; label: string; subtitle: string }> = [
-  { id: 'top-left', label: 'Top Left', subtitle: 'All windows on this screen' },
-  { id: 'top-right', label: 'Top Right', subtitle: 'All windows on this screen' },
-  { id: 'bottom-left', label: 'Bottom Left', subtitle: 'All windows on this screen' },
-  { id: 'bottom-right', label: 'Bottom Right', subtitle: 'All windows on this screen' },
-  { id: 'auto-organize', label: 'Auto organise', subtitle: 'Grid all windows on this screen' },
+  { id: 'top-left', label: 'Top Left', subtitle: 'Current window' },
+  { id: 'top-right', label: 'Top Right', subtitle: 'Current window' },
+  { id: 'bottom-left', label: 'Bottom Left', subtitle: 'Current window' },
+  { id: 'bottom-right', label: 'Bottom Right', subtitle: 'Current window' },
+  { id: 'left', label: 'Left', subtitle: 'Current window' },
+  { id: 'right', label: 'Right', subtitle: 'Current window' },
+  { id: 'top', label: 'Top', subtitle: 'Current window' },
+  { id: 'bottom', label: 'Bottom', subtitle: 'Current window' },
+  { id: 'fill', label: 'Fill', subtitle: 'Current window' },
+  { id: 'fill-80', label: 'Fill 80%', subtitle: 'Current window' },
+  { id: 'auto-organize', label: 'Auto organise', subtitle: 'All windows on this screen' },
+  { id: 'auto-fill-3', label: 'Auto fill 3', subtitle: 'All windows on this screen' },
+  { id: 'auto-fill-4', label: 'Auto fill 4', subtitle: 'All windows on this screen' },
 ];
 
-const CORNER_PRESETS: PresetId[] = ['top-left', 'top-right', 'bottom-left', 'bottom-right'];
+const MULTI_WINDOW_PRESETS = new Set<PresetId>(['auto-organize', 'auto-fill-3', 'auto-fill-4']);
+
+function renderPresetIcon(id: PresetId): JSX.Element {
+  const cells: Array<{ x: number; y: number; w: number; h: number }> = [];
+  switch (id) {
+    case 'top-left':
+      cells.push({ x: 1, y: 1, w: 9, h: 6 });
+      break;
+    case 'top-right':
+      cells.push({ x: 10, y: 1, w: 9, h: 6 });
+      break;
+    case 'bottom-left':
+      cells.push({ x: 1, y: 7, w: 9, h: 6 });
+      break;
+    case 'bottom-right':
+      cells.push({ x: 10, y: 7, w: 9, h: 6 });
+      break;
+    case 'left':
+      cells.push({ x: 1, y: 1, w: 9, h: 12 });
+      break;
+    case 'right':
+      cells.push({ x: 10, y: 1, w: 9, h: 12 });
+      break;
+    case 'top':
+      cells.push({ x: 1, y: 1, w: 18, h: 6 });
+      break;
+    case 'bottom':
+      cells.push({ x: 1, y: 7, w: 18, h: 6 });
+      break;
+    case 'fill':
+      cells.push({ x: 1, y: 1, w: 18, h: 12 });
+      break;
+    case 'fill-80':
+      cells.push({ x: 3, y: 2, w: 14, h: 10 });
+      break;
+    case 'auto-organize':
+      cells.push(
+        { x: 1, y: 1, w: 8, h: 5 },
+        { x: 11, y: 1, w: 8, h: 5 },
+        { x: 1, y: 8, w: 8, h: 5 },
+        { x: 11, y: 8, w: 8, h: 5 }
+      );
+      break;
+    case 'auto-fill-3':
+      cells.push(
+        { x: 2, y: 1, w: 4, h: 12 },
+        { x: 8, y: 1, w: 4, h: 12 },
+        { x: 14, y: 1, w: 4, h: 12 }
+      );
+      break;
+    case 'auto-fill-4':
+      cells.push(
+        { x: 2, y: 1, w: 3, h: 12 },
+        { x: 6, y: 1, w: 3, h: 12 },
+        { x: 10, y: 1, w: 3, h: 12 },
+        { x: 14, y: 1, w: 3, h: 12 }
+      );
+      break;
+    default:
+      cells.push({ x: 1, y: 1, w: 18, h: 12 });
+      break;
+  }
+
+  return (
+    <svg width={20} height={14} viewBox="0 0 20 14" fill="none" aria-hidden="true">
+      <rect
+        x={0.75}
+        y={0.75}
+        width={18.5}
+        height={12.5}
+        rx={2}
+        stroke="currentColor"
+        strokeWidth={1}
+        strokeOpacity={0.5}
+      />
+      {cells.map((cell, index) => (
+        <rect
+          key={`${id}-${index}`}
+          x={cell.x}
+          y={cell.y}
+          width={cell.w}
+          height={cell.h}
+          rx={1}
+          fill="currentColor"
+          fillOpacity={0.6}
+        />
+      ))}
+    </svg>
+  );
+}
 
 function normalizeText(value: unknown): string {
   return String(value || '').trim();
@@ -59,7 +170,7 @@ function isManageableWindow(win: ManagedWindow | null | undefined): win is Manag
   return win.positionable !== false && win.resizable !== false;
 }
 
-function getHostMetrics(hostWindow: Window | null | undefined): { left: number; top: number; width: number; height: number } {
+function getHostMetrics(hostWindow: Window | null | undefined): ScreenArea {
   const target = hostWindow || window;
   const screenObj = target.screen as any;
   return {
@@ -69,6 +180,23 @@ function getHostMetrics(hostWindow: Window | null | undefined): { left: number; 
     height: Number(screenObj?.availHeight ?? target.innerHeight ?? 900) || 900,
   };
 }
+
+function normalizeScreenArea(raw: any, fallback: ScreenArea): ScreenArea {
+  const x = Number(raw?.x);
+  const y = Number(raw?.y);
+  const width = Number(raw?.width);
+  const height = Number(raw?.height);
+  if (![x, y, width, height].every((value) => Number.isFinite(value))) {
+    return fallback;
+  }
+  return {
+    left: Math.round(x),
+    top: Math.round(y),
+    width: Math.max(1, Math.round(width)),
+    height: Math.max(1, Math.round(height)),
+  };
+}
+
 
 function getWindowCenter(win: ManagedWindow): { x: number; y: number } {
   const x = Number(win.bounds?.position?.x || 0);
@@ -104,19 +232,43 @@ function shrinkRect(rect: Rect, padding: number): Rect {
   };
 }
 
-function computeGridColumns(count: number): number {
-  if (count <= 1) return 1;
-  if (count === 2) return 2;
-  if (count <= 5) return 2;
-  return 3;
+function computeGridDimensions(count: number, region: Rect): { cols: number; rows: number } {
+  const total = Math.max(1, Math.floor(count));
+  const width = Math.max(1, Math.floor(region.width));
+  const height = Math.max(1, Math.floor(region.height));
+  const targetAspect = width / height;
+  let bestCols = 1;
+  let bestRows = total;
+  let bestScore = Number.POSITIVE_INFINITY;
+
+  for (let cols = 1; cols <= total; cols += 1) {
+    const rows = Math.ceil(total / cols);
+    const gridAspect = cols / rows;
+    const empty = rows * cols - total;
+    const score = Math.abs(gridAspect - targetAspect) + empty * 0.08;
+    if (score < bestScore) {
+      bestScore = score;
+      bestCols = cols;
+      bestRows = rows;
+    }
+  }
+
+  return { cols: Math.max(1, bestCols), rows: Math.max(1, bestRows) };
 }
 
-function computeGridRects(count: number, region: Rect, options?: { gap?: number; padding?: number }): Rect[] {
+function computeGridRects(
+  count: number,
+  region: Rect,
+  options?: { gap?: number; padding?: number; cols?: number }
+): Rect[] {
   if (count <= 0) return [];
   const gap = Math.max(0, options?.gap ?? 8);
   const padded = shrinkRect(region, options?.padding ?? 8);
-  const cols = Math.max(1, computeGridColumns(count));
-  const rows = Math.max(1, Math.ceil(count / cols));
+  const requestedCols = options?.cols ? Math.max(1, Math.floor(options.cols)) : null;
+  const resolvedCols = requestedCols ? Math.min(requestedCols, Math.max(1, count)) : null;
+  const { cols, rows } = resolvedCols
+    ? { cols: resolvedCols, rows: Math.max(1, Math.ceil(count / resolvedCols)) }
+    : computeGridDimensions(count, padded);
   const totalGapW = gap * (cols - 1);
   const totalGapH = gap * (rows - 1);
   const baseCellW = Math.max(1, Math.floor((padded.width - totalGapW) / cols));
@@ -157,6 +309,50 @@ function splitQuadrants(area: { left: number; top: number; width: number; height
   };
 }
 
+function splitVertical(area: ScreenArea): { left: Rect; right: Rect } {
+  const leftW = Math.max(1, Math.floor(area.width / 2));
+  const rightW = Math.max(1, area.width - leftW);
+  return {
+    left: { x: area.left, y: area.top, width: leftW, height: area.height },
+    right: { x: area.left + leftW, y: area.top, width: rightW, height: area.height },
+  };
+}
+
+function splitHorizontal(area: ScreenArea): { top: Rect; bottom: Rect } {
+  const topH = Math.max(1, Math.floor(area.height / 2));
+  const bottomH = Math.max(1, area.height - topH);
+  return {
+    top: { x: area.left, y: area.top, width: area.width, height: topH },
+    bottom: { x: area.left, y: area.top + topH, width: area.width, height: bottomH },
+  };
+}
+
+function getPresetRegion(presetId: PresetId, area: ScreenArea): Rect | null {
+  if (presetId === 'top-left' || presetId === 'top-right' || presetId === 'bottom-left' || presetId === 'bottom-right') {
+    const quadrants = splitQuadrants(area, { padding: 0, gap: 0 });
+    return quadrants[presetId];
+  }
+  if (presetId === 'left' || presetId === 'right') {
+    const split = splitVertical(area);
+    return presetId === 'left' ? split.left : split.right;
+  }
+  if (presetId === 'top' || presetId === 'bottom') {
+    const split = splitHorizontal(area);
+    return presetId === 'top' ? split.top : split.bottom;
+  }
+  if (presetId === 'fill') {
+    return { x: area.left, y: area.top, width: area.width, height: area.height };
+  }
+  if (presetId === 'fill-80') {
+    const width = Math.max(1, Math.round(area.width * 0.8));
+    const height = Math.max(1, Math.round(area.height * 0.8));
+    const x = area.left + Math.round((area.width - width) / 2);
+    const y = area.top + Math.round((area.height - height) / 2);
+    return { x, y, width, height };
+  }
+  return null;
+}
+
 function sortWindowsForLayout(windows: ManagedWindow[]): ManagedWindow[] {
   return [...windows].sort((a, b) => {
     const ay = Number(a.bounds?.position?.y || 0);
@@ -170,21 +366,24 @@ function sortWindowsForLayout(windows: ManagedWindow[]): ManagedWindow[] {
 }
 
 function buildAutoLayout(windows: ManagedWindow[], area: { left: number; top: number; width: number; height: number }): LayoutMove[] {
-  const rects = computeGridRects(windows.length, { x: area.left, y: area.top, width: area.width, height: area.height });
+  const rects = computeGridRects(
+    windows.length,
+    { x: area.left, y: area.top, width: area.width, height: area.height },
+    { padding: 0, gap: 0 }
+  );
   return windows.map((win, index) => ({ id: win.id, bounds: rectToBounds(rects[index]) }));
 }
 
-function buildCornerLayout(
-  presetId: Exclude<PresetId, 'auto-organize'>,
+function buildFixedGridLayout(
   windows: ManagedWindow[],
-  area: { left: number; top: number; width: number; height: number }
+  area: { left: number; top: number; width: number; height: number },
+  cols: number
 ): LayoutMove[] {
-  const quadrants = splitQuadrants(area, { padding: 0, gap: 0 });
-  const region = quadrants[presetId];
-  if (windows.length === 1) {
-    return [{ id: windows[0].id, bounds: rectToBounds(region) }];
-  }
-  const rects = computeGridRects(windows.length, region, { padding: 0, gap: 0 });
+  const rects = computeGridRects(
+    windows.length,
+    { x: area.left, y: area.top, width: area.width, height: area.height },
+    { padding: 0, gap: 0, cols }
+  );
   return windows.map((win, index) => ({ id: win.id, bounds: rectToBounds(rects[index]) }));
 }
 
@@ -204,8 +403,9 @@ const WindowManagerPanel: React.FC<WindowManagerPanelProps> = ({ show, portalTar
   const inventoryInFlightRef = useRef<Promise<ManagedWindow[]> | null>(null);
   const lastInventoryAtRef = useRef(0);
   const targetWindowRef = useRef<ManagedWindow | null>(null);
-  const targetInFlightRef = useRef<Promise<ManagedWindow | null> | null>(null);
-  const lastTargetAtRef = useRef(0);
+  const layoutAreaRef = useRef<ScreenArea | null>(null);
+  const contextInFlightRef = useRef<Promise<{ target: ManagedWindow | null; area: ScreenArea } | null> | null>(null);
+  const lastContextAtRef = useRef(0);
 
   useEffect(() => {
     windowsOnScreenRef.current = windowsOnScreen;
@@ -213,6 +413,54 @@ const WindowManagerPanel: React.FC<WindowManagerPanelProps> = ({ show, portalTar
 
   const hostWindow = portalTarget?.ownerDocument?.defaultView || null;
   const hostArea = useMemo(() => getHostMetrics(hostWindow), [hostWindow]);
+
+  const loadContext = useCallback(async (force?: boolean) => {
+    const now = Date.now();
+    if (!force && layoutAreaRef.current && now - lastContextAtRef.current < 800) {
+      return {
+        target: targetWindowRef.current,
+        area: layoutAreaRef.current,
+      };
+    }
+    if (contextInFlightRef.current) return contextInFlightRef.current;
+
+    const promise = (async () => {
+      let target: ManagedWindow | null = null;
+      let workAreaRaw: any = null;
+      try {
+        const ctx = await window.electron.getWindowManagementContext?.();
+        if (ctx) {
+          target = ctx.target as ManagedWindow | null;
+          workAreaRaw = ctx.workArea;
+        }
+      } catch {}
+      if (!target) {
+        try {
+          target = (await window.electron.getWindowManagementTargetWindow?.()) as ManagedWindow | null;
+        } catch {}
+      }
+      if (!target) {
+        try {
+          target = (await window.electron.getActiveWindow?.()) as ManagedWindow | null;
+        } catch {}
+      }
+      if (target && !isManageableWindow(target)) {
+        target = null;
+      }
+
+      const area = normalizeScreenArea(workAreaRaw, hostArea);
+      layoutAreaRef.current = area;
+      lastContextAtRef.current = Date.now();
+      targetWindowRef.current = target;
+      setWindowsOnScreen(target ? [target] : []);
+      return { target, area };
+    })();
+
+    contextInFlightRef.current = promise;
+    const result = await promise;
+    contextInFlightRef.current = null;
+    return result;
+  }, [hostArea]);
 
   const loadWindowsForLayout = useCallback(async (force?: boolean) => {
     const now = Date.now();
@@ -222,6 +470,8 @@ const WindowManagerPanel: React.FC<WindowManagerPanelProps> = ({ show, portalTar
     if (inventoryInFlightRef.current) return inventoryInFlightRef.current;
 
     const promise = (async () => {
+      const context = await loadContext(force);
+      const area = context?.area ?? hostArea;
       let all: ManagedWindow[] = [];
       try {
         all = ((await window.electron.getWindowsOnActiveDesktop()) || []) as ManagedWindow[];
@@ -230,7 +480,7 @@ const WindowManagerPanel: React.FC<WindowManagerPanelProps> = ({ show, portalTar
       }
       const screenWindows = all
         .filter(isManageableWindow)
-        .filter((win) => isWindowOnScreenArea(win, hostArea));
+        .filter((win) => isWindowOnScreenArea(win, area));
       const sorted = sortWindowsForLayout(screenWindows);
       windowsOnScreenRef.current = sorted;
       setWindowsOnScreen(sorted);
@@ -242,39 +492,7 @@ const WindowManagerPanel: React.FC<WindowManagerPanelProps> = ({ show, portalTar
     const result = await promise;
     inventoryInFlightRef.current = null;
     return result;
-  }, [hostArea]);
-
-  const loadTargetWindow = useCallback(async (force?: boolean) => {
-    const now = Date.now();
-    if (!force && targetWindowRef.current && now - lastTargetAtRef.current < 800) {
-      return targetWindowRef.current;
-    }
-    if (targetInFlightRef.current) return targetInFlightRef.current;
-
-    const promise = (async () => {
-      let target: ManagedWindow | null = null;
-      try {
-        target = (await window.electron.getWindowManagementTargetWindow?.()) as ManagedWindow | null;
-      } catch {}
-      if (!target) {
-        try {
-          target = (await window.electron.getActiveWindow?.()) as ManagedWindow | null;
-        } catch {}
-      }
-      if (target && !isManageableWindow(target)) {
-        target = null;
-      }
-      targetWindowRef.current = target;
-      lastTargetAtRef.current = Date.now();
-      setWindowsOnScreen(target ? [target] : []);
-      return target;
-    })();
-
-    targetInFlightRef.current = promise;
-    const result = await promise;
-    targetInFlightRef.current = null;
-    return result;
-  }, []);
+  }, [hostArea, loadContext]);
 
   useEffect(() => {
     if (!show || !portalTarget) return;
@@ -285,18 +503,21 @@ const WindowManagerPanel: React.FC<WindowManagerPanelProps> = ({ show, portalTar
     previewSeqRef.current += 1;
     setWindowsOnScreen([]);
     targetWindowRef.current = null;
-    lastTargetAtRef.current = 0;
+    layoutAreaRef.current = null;
+    lastContextAtRef.current = 0;
     setStatusText('Select a preset to arrange windows.');
     requestAnimationFrame(() => listRef.current?.focus());
   }, [show, portalTarget, loadWindowsForLayout]);
 
   const applyPresetNow = useCallback(async (presetId: PresetId, options?: { force?: boolean }) => {
-    const isAuto = presetId === 'auto-organize';
-    const windows = isAuto ? await loadWindowsForLayout(options?.force) : [];
-    const target = isAuto ? null : await loadTargetWindow(options?.force);
-    const layoutWindows = isAuto ? windows : (target ? [target] : []);
+    const isMultiWindow = MULTI_WINDOW_PRESETS.has(presetId);
+    const context = await loadContext(options?.force);
+    const layoutArea = context?.area ?? hostArea;
+    const windows = isMultiWindow ? await loadWindowsForLayout(options?.force) : [];
+    const target = isMultiWindow ? null : context?.target ?? null;
+    const layoutWindows = isMultiWindow ? windows : (target ? [target] : []);
     if (!layoutWindows || layoutWindows.length === 0) {
-      setStatusText(isAuto ? 'No movable windows found on this screen.' : 'No target window found.');
+      setStatusText(isMultiWindow ? 'No movable windows found on this screen.' : 'No target window found.');
       return;
     }
 
@@ -305,9 +526,21 @@ const WindowManagerPanel: React.FC<WindowManagerPanelProps> = ({ show, portalTar
     lastPreviewKeyRef.current = previewKey;
 
     const sorted = sortWindowsForLayout(layoutWindows);
-    const moves = isAuto
-      ? buildAutoLayout(sorted, hostArea)
-      : buildCornerLayout(presetId as Exclude<PresetId, 'auto-organize'>, sorted, hostArea);
+    let moves: LayoutMove[] = [];
+    if (isMultiWindow) {
+      if (presetId === 'auto-fill-3') {
+        moves = buildFixedGridLayout(sorted, layoutArea, 3);
+      } else if (presetId === 'auto-fill-4') {
+        moves = buildFixedGridLayout(sorted, layoutArea, 4);
+      } else {
+        moves = buildAutoLayout(sorted, layoutArea);
+      }
+    } else {
+      const region = getPresetRegion(presetId, layoutArea);
+      if (region && target) {
+        moves = [{ id: target.id, bounds: rectToBounds(region) }];
+      }
+    }
 
     if (moves.length === 0) {
       setStatusText('No windows to move.');
@@ -319,8 +552,14 @@ const WindowManagerPanel: React.FC<WindowManagerPanelProps> = ({ show, portalTar
       await window.electron.setWindowLayout(moves);
       if (seq !== previewSeqRef.current) return;
       setAppliedPreset(presetId);
-      if (isAuto) {
-        const cols = computeGridColumns(sorted.length);
+      if (isMultiWindow) {
+        const colsOverride = presetId === 'auto-fill-3' ? 3 : presetId === 'auto-fill-4' ? 4 : null;
+        const cols = colsOverride ?? computeGridDimensions(sorted.length, {
+          x: layoutArea.left,
+          y: layoutArea.top,
+          width: layoutArea.width,
+          height: layoutArea.height,
+        }).cols;
         setStatusText(`Previewing grid (${cols} col${cols > 1 ? 's' : ''}) for ${sorted.length} windows.`);
       } else {
         setStatusText(`Previewing ${PRESETS.find((p) => p.id === presetId)?.label} layout for ${sorted.length} windows.`);
@@ -331,7 +570,7 @@ const WindowManagerPanel: React.FC<WindowManagerPanelProps> = ({ show, portalTar
         setStatusText('Failed to move windows. Check Accessibility permission.');
       }
     }
-  }, [hostArea, loadTargetWindow, loadWindowsForLayout]);
+  }, [hostArea, loadContext, loadWindowsForLayout]);
 
   const drainPreviewQueue = useCallback(async () => {
     if (previewLoopRunningRef.current) return;
@@ -526,6 +765,7 @@ const WindowManagerPanel: React.FC<WindowManagerPanelProps> = ({ show, portalTar
           {PRESETS.map((preset, index) => {
             const isSelected = index === selectedIndex;
             const isApplied = appliedPreset === preset.id;
+            const iconColor = isSelected ? 'rgba(120, 225, 255, 0.9)' : 'rgba(255,255,255,0.55)';
             return (
               <div
                 key={preset.id}
@@ -552,7 +792,7 @@ const WindowManagerPanel: React.FC<WindowManagerPanelProps> = ({ show, portalTar
                 }}
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: '1fr auto',
+                  gridTemplateColumns: '28px 1fr auto',
                   alignItems: 'center',
                   gap: 8,
                   padding: '8px 12px',
@@ -566,6 +806,9 @@ const WindowManagerPanel: React.FC<WindowManagerPanelProps> = ({ show, portalTar
                 }}
                 title={`${preset.label} (${preset.subtitle})`}
               >
+                <div style={{ width: 22, display: 'flex', alignItems: 'center', justifyContent: 'center', color: iconColor }}>
+                  {renderPresetIcon(preset.id)}
+                </div>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.96)' }}>{preset.label}</div>
                   <div style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.56)' }}>{preset.subtitle}</div>

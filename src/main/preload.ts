@@ -615,6 +615,8 @@ contextBridge.exposeInMainWorld('electron', {
     ipcRenderer.invoke('window-management-get-active-window'),
   getWindowManagementTargetWindow: (): Promise<any> =>
     ipcRenderer.invoke('window-management-get-target-window'),
+  getWindowManagementContext: (): Promise<any> =>
+    ipcRenderer.invoke('window-management-get-context'),
   getWindowsOnActiveDesktop: (): Promise<any[]> =>
     ipcRenderer.invoke('window-management-get-windows-on-active-desktop'),
   getDesktops: (): Promise<any[]> =>
