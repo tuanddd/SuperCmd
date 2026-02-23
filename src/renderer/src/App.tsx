@@ -790,9 +790,17 @@ const App: React.FC = () => {
   // When calculator is showing but no commands match, show unfiltered list below
   const sourceCommands =
     calcResult && filteredCommands.length === 0 ? contextualCommands : filteredCommands;
+  const hiddenListOnlyCommandIds = useMemo(
+    () => new Set(['system-add-to-memory', 'system-cursor-prompt']),
+    []
+  );
+  const visibleSourceCommands = useMemo(
+    () => sourceCommands.filter((cmd) => !hiddenListOnlyCommandIds.has(cmd.id)),
+    [sourceCommands, hiddenListOnlyCommandIds]
+  );
 
   const groupedCommands = useMemo(() => {
-    const sourceMap = new Map(sourceCommands.map((cmd) => [cmd.id, cmd]));
+    const sourceMap = new Map(visibleSourceCommands.map((cmd) => [cmd.id, cmd]));
     const hasSelection = selectedTextSnapshot.trim().length > 0;
     const contextual = hasSelection
       ? (sourceMap.get('system-add-to-memory') ? [sourceMap.get('system-add-to-memory') as CommandInfo] : [])
@@ -814,12 +822,12 @@ const App: React.FC = () => {
       );
     const recentSet = new Set(recent.map((c) => c.id));
 
-    const other = sourceCommands.filter(
+    const other = visibleSourceCommands.filter(
       (c) => !pinnedSet.has(c.id) && !recentSet.has(c.id) && !contextualIds.has(c.id)
     );
 
     return { contextual, pinned, recent, other };
-  }, [sourceCommands, pinnedCommands, recentCommands, selectedTextSnapshot]);
+  }, [visibleSourceCommands, pinnedCommands, recentCommands, selectedTextSnapshot]);
 
   const displayCommands = useMemo(
     () => [
