@@ -11,6 +11,7 @@
  */
 
 import * as path from 'path';
+import { fork, type ChildProcess } from 'child_process';
 import { getAvailableCommands, executeCommand, invalidateCache } from './commands';
 import { loadSettings, saveSettings, setOAuthToken, getOAuthToken, removeOAuthToken } from './settings-store';
 import type { AppSettings } from './settings-store';
@@ -99,12 +100,43 @@ type NodeWindowInfo = {
   bounds?: NodeWindowBounds;
 };
 
-let cachedWindowManagerApi: any | null = null;
 let cachedElectronLiquidGlassApi: any | null | undefined = undefined;
 let hasLoggedLiquidGlassRuntimeIncompatibility = false;
 let windowManagerAccessRequested = false;
 let windowManagementTargetWindowId: string | null = null;
 let windowManagementTargetWorkArea: { x: number; y: number; width: number; height: number } | null = null;
+const WINDOW_MANAGEMENT_MUTATION_MIN_INTERVAL_MS = 20;
+let windowManagementMutationQueue: Promise<void> = Promise.resolve();
+let lastWindowManagementMutationAt = 0;
+const WINDOW_MANAGER_WORKER_REQUEST_TIMEOUT_MS = 1400;
+const WINDOW_MANAGER_WORKER_RECOVERY_BACKOFF_MS = 500;
+const WINDOW_MANAGER_WORKER_CRASH_WINDOW_MS = 10000;
+type WindowManagerWorkerMethod =
+  | 'request-accessibility'
+  | 'list-windows'
+  | 'get-active-window'
+  | 'get-window-by-id'
+  | 'set-window-bounds';
+type WindowManagerWorkerRequest = {
+  id: number;
+  method: WindowManagerWorkerMethod;
+  payload?: any;
+};
+type WindowManagerWorkerResponse = {
+  id: number;
+  ok: boolean;
+  result?: any;
+  error?: string;
+};
+let windowManagerWorker: ChildProcess | null = null;
+let windowManagerWorkerReqSeq = 0;
+let windowManagerWorkerRestartTimer: ReturnType<typeof setTimeout> | null = null;
+let windowManagerWorkerCrashTimestamps: number[] = [];
+const windowManagerWorkerPending = new Map<number, {
+  resolve: (value: any) => void;
+  reject: (reason?: any) => void;
+  timer: ReturnType<typeof setTimeout>;
+}>();
 
 function parseMajorVersion(value: string | undefined): number | null {
   if (!value) return null;
@@ -125,16 +157,178 @@ function warnIfElectronLiquidGlassRuntimeLooksIncompatible(): void {
   }
 }
 
-function getWindowManagerApi(): any | null {
-  if (cachedWindowManagerApi) return cachedWindowManagerApi;
+function getWindowManagerWorkerPath(): string {
+  return path.join(__dirname, 'window-manager-worker.js');
+}
+
+function isWindowManagerWorkerAlive(proc: ChildProcess | null): proc is ChildProcess {
+  return Boolean(proc && proc.exitCode === null && !proc.killed && proc.connected);
+}
+
+function rejectAllWindowManagerWorkerPending(errorMessage: string): void {
+  for (const [id, pending] of windowManagerWorkerPending.entries()) {
+    clearTimeout(pending.timer);
+    pending.reject(new Error(errorMessage));
+    windowManagerWorkerPending.delete(id);
+  }
+}
+
+function trackWindowManagerWorkerCrash(now: number): void {
+  windowManagerWorkerCrashTimestamps = windowManagerWorkerCrashTimestamps.filter(
+    (value) => now - value <= WINDOW_MANAGER_WORKER_CRASH_WINDOW_MS
+  );
+  windowManagerWorkerCrashTimestamps.push(now);
+  if (windowManagerWorkerCrashTimestamps.length >= 4) {
+    windowManagerWorkerCrashTimestamps = [];
+    console.warn('[WindowManager] Worker crashed repeatedly; continuing with restart/backoff.');
+  }
+}
+
+function scheduleWindowManagerWorkerRestart(): void {
+  if (windowManagerWorkerRestartTimer) return;
+  windowManagerWorkerRestartTimer = setTimeout(() => {
+    windowManagerWorkerRestartTimer = null;
+    ensureWindowManagerWorker();
+  }, WINDOW_MANAGER_WORKER_RECOVERY_BACKOFF_MS);
+}
+
+function attachWindowManagerWorkerListeners(proc: ChildProcess): void {
+  proc.on('message', (message: WindowManagerWorkerResponse) => {
+    if (!message || typeof message !== 'object') return;
+    const pending = windowManagerWorkerPending.get(Number(message.id));
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    windowManagerWorkerPending.delete(Number(message.id));
+    if (message.ok) {
+      pending.resolve(message.result);
+      return;
+    }
+    pending.reject(new Error(String(message.error || 'window manager worker request failed')));
+  });
+
+  proc.on('exit', (_code, signal) => {
+    if (windowManagerWorker !== proc) return;
+    windowManagerWorker = null;
+    const now = Date.now();
+    const reason = signal ? `signal ${signal}` : 'unknown exit';
+    rejectAllWindowManagerWorkerPending(`[WindowManager] Worker exited (${reason}).`);
+    trackWindowManagerWorkerCrash(now);
+    scheduleWindowManagerWorkerRestart();
+  });
+
+  proc.on('error', (error) => {
+    if (windowManagerWorker !== proc) return;
+    rejectAllWindowManagerWorkerPending('[WindowManager] Worker error.');
+    console.error('[WindowManager] Worker process error:', error);
+  });
+}
+
+function ensureWindowManagerWorker(): ChildProcess | null {
+  if (isWindowManagerWorkerAlive(windowManagerWorker)) return windowManagerWorker;
   try {
-    const mod = require('node-window-manager');
-    cachedWindowManagerApi = mod?.windowManager || mod;
-    return cachedWindowManagerApi;
+    const workerPath = getWindowManagerWorkerPath();
+    const proc = fork(workerPath, [], {
+      stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+      execArgv: [],
+    });
+    windowManagerWorker = proc;
+    attachWindowManagerWorkerListeners(proc);
+    return proc;
   } catch (error) {
-    console.error('[WindowManager] Failed to load node-window-manager:', error);
+    console.error('[WindowManager] Failed to spawn worker:', error);
     return null;
   }
+}
+
+async function callWindowManagerWorker<T>(
+  method: WindowManagerWorkerMethod,
+  payload?: any,
+  timeoutMs: number = WINDOW_MANAGER_WORKER_REQUEST_TIMEOUT_MS
+): Promise<T> {
+  const sendAttempt = async (): Promise<T> => {
+    const proc = ensureWindowManagerWorker();
+    if (!proc || !isWindowManagerWorkerAlive(proc)) {
+      throw new Error('window manager worker unavailable');
+    }
+    const id = ++windowManagerWorkerReqSeq;
+    return await new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        windowManagerWorkerPending.delete(id);
+        reject(new Error(`[WindowManager] Worker request timed out (${method}).`));
+      }, Math.max(250, timeoutMs));
+      windowManagerWorkerPending.set(id, { resolve, reject, timer });
+      const request: WindowManagerWorkerRequest = { id, method, payload };
+      try {
+        proc.send(request, (error?: Error | null) => {
+          if (!error) return;
+          const pending = windowManagerWorkerPending.get(id);
+          if (!pending) return;
+          clearTimeout(pending.timer);
+          windowManagerWorkerPending.delete(id);
+          pending.reject(error);
+        });
+      } catch (error) {
+        clearTimeout(timer);
+        windowManagerWorkerPending.delete(id);
+        reject(error);
+      }
+    });
+  };
+
+  try {
+    return await sendAttempt();
+  } catch (error) {
+    const message = String((error as any)?.message || error || '');
+    if (!message.includes('worker unavailable')) {
+      throw error;
+    }
+  }
+
+  await new Promise((resolve) => setTimeout(resolve, 90));
+  return await sendAttempt();
+}
+
+function normalizeNodeWindowInfo(raw: any): NodeWindowInfo | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const idRaw = (raw as any).id;
+  const id = typeof idRaw === 'number' ? idRaw : Number(idRaw);
+  if (!Number.isFinite(id)) return null;
+  const title = String((raw as any).title || '');
+  const pathValue = String((raw as any).path || '');
+  const processIdRaw = (raw as any).processId;
+  const processId = typeof processIdRaw === 'number' ? processIdRaw : Number(processIdRaw);
+  const boundsRaw = (raw as any).bounds;
+  let bounds: NodeWindowBounds | undefined;
+  if (boundsRaw && typeof boundsRaw === 'object') {
+    const x = Number((boundsRaw as any).x);
+    const y = Number((boundsRaw as any).y);
+    const width = Number((boundsRaw as any).width);
+    const height = Number((boundsRaw as any).height);
+    if ([x, y, width, height].every((value) => Number.isFinite(value))) {
+      bounds = {
+        x: Math.round(x),
+        y: Math.round(y),
+        width: Math.max(1, Math.round(width)),
+        height: Math.max(1, Math.round(height)),
+      };
+    }
+  }
+  return {
+    id,
+    title,
+    path: pathValue,
+    processId: Number.isFinite(processId) ? processId : undefined,
+    bounds,
+  };
+}
+
+function isTransientWindowManagerWorkerError(error: any): boolean {
+  const message = String(error?.message || error || '').toLowerCase();
+  return (
+    message.includes('worker unavailable') ||
+    message.includes('worker exited') ||
+    message.includes('worker request timed out')
+  );
 }
 
 function getElectronLiquidGlassApi(): any | null {
@@ -227,40 +421,19 @@ function applyLiquidGlassToWindowManagerPopup(win: any): void {
   void applyEffect();
 }
 
-function ensureWindowManagerAccess(): void {
-  const api = getWindowManagerApi();
-  if (!api) return;
+async function ensureWindowManagerAccess(): Promise<void> {
   if (process.platform !== 'darwin') return;
   if (windowManagerAccessRequested) return;
-  windowManagerAccessRequested = true;
   try {
-    if (typeof api.requestAccessibility === 'function') {
-      api.requestAccessibility();
-    }
+    await callWindowManagerWorker('request-accessibility');
+    windowManagerAccessRequested = true;
   } catch (error) {
     console.warn('[WindowManager] Accessibility request failed:', error);
   }
 }
 
-function getNodeWindowInfo(win: any): NodeWindowInfo {
-  const info = typeof win?.getInfo === 'function' ? win.getInfo() : {};
-  const bounds = typeof win?.getBounds === 'function' ? win.getBounds() : info?.bounds;
-  const title = info?.title || (typeof win?.getTitle === 'function' ? win.getTitle() : '');
-  const id = info?.id ?? win?.id;
-  const pathValue = info?.path ?? win?.path;
-  const processId = info?.processId ?? win?.processId;
-  return {
-    id: typeof id === 'number' ? id : Number(id),
-    title: String(title || ''),
-    path: String(pathValue || ''),
-    processId: typeof processId === 'number' ? processId : Number(processId),
-    bounds: bounds && typeof bounds === 'object' ? bounds : undefined,
-  };
-}
-
-function toWindowManagementWindowFromNode(win: any, active: boolean): any | null {
-  if (!win) return null;
-  const info = getNodeWindowInfo(win);
+function toWindowManagementWindowFromNode(info: NodeWindowInfo | null, active: boolean): any | null {
+  if (!info) return null;
   if (!info.id || !info.bounds) return null;
   const x = Number(info.bounds.x);
   const y = Number(info.bounds.y);
@@ -290,19 +463,7 @@ function toWindowManagementWindowFromNode(win: any, active: boolean): any | null
   };
 }
 
-function getNodeWindows(): any[] {
-  const api = getWindowManagerApi();
-  if (!api || typeof api.getWindows !== 'function') return [];
-  try {
-    const windows = api.getWindows();
-    if (!Array.isArray(windows)) return [];
-    return windows.filter((win) => !isSelfManagedWindow(win));
-  } catch {
-    return [];
-  }
-}
-
-function isSelfManagedWindow(win: any): boolean {
+function isSelfManagedWindow(win: NodeWindowInfo | null | undefined): boolean {
   if (!win) return false;
   const processId = typeof win.processId === 'number' ? win.processId : Number(win.processId);
   if (processId && processId === process.pid) return true;
@@ -314,23 +475,43 @@ function isSelfManagedWindow(win: any): boolean {
     if (appName && appPath.includes(`${appName}.app`)) return true;
     if (appPath.includes('SuperCmd.app')) return true;
   }
-  let title = '';
-  try {
-    if (typeof win.getTitle === 'function') {
-      title = String(win.getTitle() || '');
-    }
-  } catch {}
+  const title = String(win.title || '');
   if (title.toLowerCase().includes('supercmd')) return true;
   return false;
 }
 
-function captureWindowManagementTargetWindow(): void {
-  const api = getWindowManagerApi();
-  if (!api || typeof api.getActiveWindow !== 'function') return;
+async function getNodeWindows(): Promise<NodeWindowInfo[]> {
   try {
-    const win = api.getActiveWindow();
-    if (!win || isSelfManagedWindow(win)) return;
-    const info = getNodeWindowInfo(win);
+    const rawWindows = await callWindowManagerWorker<any[]>('list-windows');
+    const windows = Array.isArray(rawWindows)
+      ? rawWindows
+        .map((entry) => normalizeNodeWindowInfo(entry))
+        .filter(Boolean) as NodeWindowInfo[]
+      : [];
+    return windows.filter((win) => !isSelfManagedWindow(win));
+  } catch {
+    return [];
+  }
+}
+
+async function getNodeWindowById(id: string): Promise<NodeWindowInfo | null> {
+  const normalizedId = String(id || '').trim();
+  if (!normalizedId) return null;
+  try {
+    const raw = await callWindowManagerWorker<any>('get-window-by-id', { id: normalizedId });
+    const info = normalizeNodeWindowInfo(raw);
+    if (!info || isSelfManagedWindow(info)) return null;
+    return info;
+  } catch {
+    return null;
+  }
+}
+
+async function captureWindowManagementTargetWindow(): Promise<void> {
+  try {
+    const raw = await callWindowManagerWorker<any>('get-active-window');
+    const info = normalizeNodeWindowInfo(raw);
+    if (!info || isSelfManagedWindow(info)) return;
     if (info?.id) {
       windowManagementTargetWindowId = String(info.id);
     }
@@ -346,32 +527,25 @@ function captureWindowManagementTargetWindow(): void {
   }
 }
 
-function findNodeWindowById(id: string, windows?: any[]): any | null {
+function findNodeWindowById(id: string, windows: NodeWindowInfo[]): NodeWindowInfo | null {
   const numericId = Number(id);
-  const list = windows || getNodeWindows();
-  return list.find((win) => {
-    const winId = typeof win?.id === 'number' ? win.id : Number(win?.id);
-    if (Number.isFinite(winId)) return winId === numericId;
-    const info = getNodeWindowInfo(win);
-    return Number(info.id) === numericId;
-  }) || null;
+  if (!Number.isFinite(numericId)) return null;
+  return windows.find((win) => Number(win?.id) === numericId) || null;
 }
 
-function matchNodeWindowForFrontmost(windows: any[]): any | null {
+function matchNodeWindowForFrontmost(windows: NodeWindowInfo[]): NodeWindowInfo | null {
   const appPath = String(lastFrontmostApp?.path || '').trim();
   if (appPath) {
     const match = windows.find((win) => {
-      const info = getNodeWindowInfo(win);
-      return String(info.path || '') === appPath;
+      return String(win.path || '') === appPath;
     });
     if (match) return match;
   }
   const appName = String(lastFrontmostApp?.name || '').trim().toLowerCase();
   if (appName) {
     const match = windows.find((win) => {
-      const info = getNodeWindowInfo(win);
-      const title = String(info.title || '').toLowerCase();
-      const pathValue = String(info.path || '').toLowerCase();
+      const title = String(win.title || '').toLowerCase();
+      const pathValue = String(win.path || '').toLowerCase();
       return title.includes(appName) || pathValue.includes(appName);
     });
     if (match) return match;
@@ -379,22 +553,23 @@ function matchNodeWindowForFrontmost(windows: any[]): any | null {
   return null;
 }
 
-function getNodeSnapshot(): { target: any | null; windows: any[] } {
-  const api = getWindowManagerApi();
-  if (!api) return { target: null, windows: [] };
-  const windows = getNodeWindows();
-  let target: any | null = null;
+async function getNodeSnapshot(): Promise<{ target: NodeWindowInfo | null; windows: NodeWindowInfo[] }> {
+  const windows = await getNodeWindows();
+  let target: NodeWindowInfo | null = null;
   if (windowManagementTargetWindowId) {
     target = findNodeWindowById(windowManagementTargetWindowId, windows);
   }
   if (!target) {
     target = matchNodeWindowForFrontmost(windows);
   }
-  if (!target && typeof api.getActiveWindow === 'function') {
-    const active = api.getActiveWindow();
-    if (active && !isSelfManagedWindow(active)) {
-      target = active;
-    }
+  if (!target) {
+    try {
+      const activeRaw = await callWindowManagerWorker<any>('get-active-window');
+      const activeInfo = normalizeNodeWindowInfo(activeRaw);
+      if (activeInfo && !isSelfManagedWindow(activeInfo)) {
+        target = findNodeWindowById(String(activeInfo.id || ''), windows) || activeInfo;
+      }
+    } catch {}
   }
   return { target, windows };
 }
@@ -1036,6 +1211,144 @@ let launcherMode: LauncherMode = 'default';
 let lastWhisperToggleAt = 0;
 let lastWhisperShownAt = 0;
 const INTERNAL_CLIPBOARD_PROBE_REGEX = /^__supercmd_[a-z0-9_]+_probe__\d+_[a-z0-9]+$/i;
+const WINDOW_MANAGEMENT_PRESET_COMMAND_IDS = new Set<string>([
+  'system-window-management-left',
+  'system-window-management-right',
+  'system-window-management-top',
+  'system-window-management-bottom',
+  'system-window-management-center',
+  'system-window-management-center-80',
+  'system-window-management-fill',
+  'system-window-management-top-left',
+  'system-window-management-top-right',
+  'system-window-management-bottom-left',
+  'system-window-management-bottom-right',
+  'system-window-management-auto-organize',
+  'system-window-management-increase-size-10',
+  'system-window-management-decrease-size-10',
+  'system-window-management-increase-left-10',
+  'system-window-management-increase-right-10',
+  'system-window-management-increase-top-10',
+  'system-window-management-increase-bottom-10',
+  'system-window-management-move-up-10',
+  'system-window-management-move-down-10',
+  'system-window-management-move-left-10',
+  'system-window-management-move-right-10',
+]);
+type QueuedWindowMutation = { id: string; x: number; y: number; width: number; height: number };
+const WINDOW_MANAGEMENT_MUTATION_BATCH_MS = 42;
+const WINDOW_MANAGEMENT_PRESET_HOTKEY_MIN_INTERVAL_MS = 52;
+let pendingWindowMutationsById = new Map<string, QueuedWindowMutation>();
+let windowMutationBatchTimer: ReturnType<typeof setTimeout> | null = null;
+let windowMutationBatchInFlight = false;
+let windowMutationFlushWaiters: Array<(value: boolean) => void> = [];
+let lastWindowManagementPresetHotkeyAt = 0;
+
+function isWindowManagementSystemCommand(commandId: string): boolean {
+  const normalized = String(commandId || '').trim();
+  return normalized === 'system-window-management' || WINDOW_MANAGEMENT_PRESET_COMMAND_IDS.has(normalized);
+}
+
+function enqueueWindowManagementMutation<T>(task: () => Promise<T> | T): Promise<T> {
+  const run = async (): Promise<T> => {
+    const elapsed = Date.now() - lastWindowManagementMutationAt;
+    if (elapsed < WINDOW_MANAGEMENT_MUTATION_MIN_INTERVAL_MS) {
+      await new Promise((resolve) => setTimeout(resolve, WINDOW_MANAGEMENT_MUTATION_MIN_INTERVAL_MS - elapsed));
+    }
+    try {
+      return await task();
+    } finally {
+      lastWindowManagementMutationAt = Date.now();
+    }
+  };
+  const queued = windowManagementMutationQueue.then(run, run);
+  windowManagementMutationQueue = queued.then(() => undefined, () => undefined);
+  return queued;
+}
+
+function queueWindowMutations(entries: QueuedWindowMutation[]): Promise<boolean> {
+  if (!Array.isArray(entries) || entries.length === 0) {
+    return Promise.resolve(false);
+  }
+  for (const entry of entries) {
+    pendingWindowMutationsById.set(entry.id, entry);
+  }
+  const completion = new Promise<boolean>((resolve) => {
+    windowMutationFlushWaiters.push(resolve);
+  });
+  if (windowMutationBatchTimer || windowMutationBatchInFlight) return completion;
+  windowMutationBatchTimer = setTimeout(() => {
+    windowMutationBatchTimer = null;
+    void flushQueuedWindowMutations();
+  }, WINDOW_MANAGEMENT_MUTATION_BATCH_MS);
+  return completion;
+}
+
+async function flushQueuedWindowMutations(): Promise<void> {
+  if (windowMutationBatchInFlight) return;
+  if (pendingWindowMutationsById.size === 0) return;
+  windowMutationBatchInFlight = true;
+  const batch = Array.from(pendingWindowMutationsById.values());
+  const waiters = windowMutationFlushWaiters;
+  windowMutationFlushWaiters = [];
+  pendingWindowMutationsById = new Map<string, QueuedWindowMutation>();
+  let success = true;
+  try {
+    await enqueueWindowManagementMutation(async () => {
+      await ensureWindowManagerAccess();
+      const windows = await getNodeWindows();
+      const windowMap = new Map<string, NodeWindowInfo>();
+      windows.forEach((win) => {
+        if (win?.id !== undefined) {
+          windowMap.set(String(win.id), win);
+        }
+      });
+      for (let index = 0; index < batch.length; index += 1) {
+        const entry = batch[index];
+        const win = windowMap.get(entry.id);
+        if (!win) continue;
+        if (isSelfManagedWindow(win)) continue;
+        try {
+          await callWindowManagerWorker(
+            'set-window-bounds',
+            {
+              id: entry.id,
+              bounds: {
+                x: entry.x,
+                y: entry.y,
+                width: entry.width,
+                height: entry.height,
+              },
+            },
+            1800
+          );
+        } catch (error) {
+          success = false;
+          console.warn('[WindowManager] Failed setBounds for window:', entry.id, error);
+        }
+        if (index < batch.length - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 4));
+        }
+      }
+    });
+  } catch (error) {
+    success = false;
+    console.error('Failed to flush queued window mutations:', error);
+  } finally {
+    for (const resolve of waiters) {
+      try {
+        resolve(success);
+      } catch {}
+    }
+    windowMutationBatchInFlight = false;
+    if (pendingWindowMutationsById.size > 0 && !windowMutationBatchTimer) {
+      windowMutationBatchTimer = setTimeout(() => {
+        windowMutationBatchTimer = null;
+        void flushQueuedWindowMutations();
+      }, WINDOW_MANAGEMENT_MUTATION_BATCH_MS);
+    }
+  }
+}
 
 function isWindowShownRoutedSystemCommand(commandId: string): boolean {
   return (
@@ -4556,8 +4869,8 @@ async function openLauncherAndRunSystemCommand(
   const showLauncher = options?.showWindow !== false;
   const preserveFocusWhenHidden = options?.preserveFocusWhenHidden ?? !showLauncher;
 
-  if (commandId === 'system-window-management') {
-    captureWindowManagementTargetWindow();
+  if (isWindowManagementSystemCommand(commandId)) {
+    await captureWindowManagementTargetWindow();
   }
   if (preserveFocusWhenHidden) {
     captureFrontmostAppContext();
@@ -4662,6 +4975,13 @@ async function runCommandById(commandId: string, source: 'launcher' | 'hotkey' =
   }
   if (isAISectionDisabledForCommand(commandId)) {
     return false;
+  }
+  if (source === 'hotkey' && WINDOW_MANAGEMENT_PRESET_COMMAND_IDS.has(String(commandId || '').trim())) {
+    const now = Date.now();
+    if (now - lastWindowManagementPresetHotkeyAt < WINDOW_MANAGEMENT_PRESET_HOTKEY_MIN_INTERVAL_MS) {
+      return true;
+    }
+    lastWindowManagementPresetHotkeyAt = now;
   }
 
   const isWhisperOpenCommand =
@@ -4856,14 +5176,13 @@ async function runCommandById(commandId: string, source: 'launcher' | 'hotkey' =
       mode: launcherMode === 'onboarding' ? 'onboarding' : 'default',
     });
   }
-  if (commandId === 'system-window-management') {
+  if (isWindowManagementSystemCommand(commandId)) {
     return await openLauncherAndRunSystemCommand(commandId, {
       showWindow: false,
       mode: launcherMode === 'onboarding' ? 'onboarding' : 'default',
-      // Keep focus in SuperCmd for this command: detached window manager closes
-      // itself on blur, so restoring the previous app focus would immediately
-      // dismiss it after opening from hotkey.
-      preserveFocusWhenHidden: false,
+      // Keep focus in SuperCmd only for the panel command: detached window manager
+      // closes itself on blur. Preset commands should restore app focus normally.
+      preserveFocusWhenHidden: commandId !== 'system-window-management',
     });
   }
   if (commandId === 'system-import-snippets') {
@@ -6403,6 +6722,8 @@ protocol.registerSchemesAsPrivileged([
 app.whenReady().then(async () => {
   app.setAsDefaultProtocolClient('supercmd');
   scrubInternalClipboardProbe('app startup');
+  // Warm the worker so the first window-management action does not race spawn.
+  setTimeout(() => { ensureWindowManagerWorker(); }, 0);
 
   // Register the sc-asset:// protocol handler to serve extension asset files
   protocol.handle('sc-asset', (request: any) => {
@@ -9001,61 +9322,71 @@ return appURL's |path|() as text`,
 
   ipcMain.handle('window-management-get-active-window', async () => {
     try {
-      const api = getWindowManagerApi();
-      if (!api || typeof api.getActiveWindow !== 'function') return null;
-      const win = api.getActiveWindow();
+      const raw = await callWindowManagerWorker<any>('get-active-window');
+      const win = normalizeNodeWindowInfo(raw);
+      if (!win || isSelfManagedWindow(win)) return null;
       return toWindowManagementWindowFromNode(win, true);
     } catch (error) {
-      console.error('Failed to get active window:', error);
+      if (!isTransientWindowManagerWorkerError(error)) {
+        console.error('Failed to get active window:', error);
+      }
       return null;
     }
   });
 
   ipcMain.handle('window-management-get-target-window', async () => {
     try {
-      const snapshot = getNodeSnapshot();
+      const snapshot = await getNodeSnapshot();
       if (snapshot.target) {
         return toWindowManagementWindowFromNode(snapshot.target, true);
       }
       return null;
     } catch (error) {
-      console.error('Failed to get target window:', error);
+      if (!isTransientWindowManagerWorkerError(error)) {
+        console.error('Failed to get target window:', error);
+      }
       return null;
     }
   });
 
   ipcMain.handle('window-management-get-context', async () => {
     try {
-      const snapshot = getNodeSnapshot();
+      const snapshot = await getNodeSnapshot();
       const target = snapshot.target ? toWindowManagementWindowFromNode(snapshot.target, true) : null;
       const { screen: electronScreen } = require('electron');
       const fallbackDisplay = electronScreen.getDisplayNearestPoint(electronScreen.getCursorScreenPoint());
       const workArea = windowManagementTargetWorkArea || fallbackDisplay?.workArea || null;
       return { target, workArea };
     } catch (error) {
-      console.error('Failed to get window management context:', error);
+      if (!isTransientWindowManagerWorkerError(error)) {
+        console.error('Failed to get window management context:', error);
+      }
       return { target: null, workArea: null };
     }
   });
 
   ipcMain.handle('window-management-get-windows-on-active-desktop', async () => {
     try {
-      const windows = getNodeWindows();
+      const windows = await getNodeWindows();
       return windows.map((win) => toWindowManagementWindowFromNode(win, false)).filter(Boolean);
     } catch (error) {
-      console.error('Failed to get windows:', error);
+      if (!isTransientWindowManagerWorkerError(error)) {
+        console.error('Failed to get windows:', error);
+      }
       return [];
     }
   });
 
   ipcMain.handle('window-management-snapshot', async () => {
     try {
-      const snapshot = getNodeSnapshot();
+      const snapshot = await getNodeSnapshot();
       const target = snapshot.target ? toWindowManagementWindowFromNode(snapshot.target, true) : null;
       const windows = snapshot.windows.map((win) => toWindowManagementWindowFromNode(win, false)).filter(Boolean);
       return { target, windows };
     } catch (error) {
-      console.error('Failed to get window snapshot:', error);
+      if (!isTransientWindowManagerWorkerError(error)) {
+        console.error('Failed to get window snapshot:', error);
+      }
       return { target: null, windows: [] };
     }
   });
@@ -9085,63 +9416,73 @@ return appURL's |path|() as text`,
 
   ipcMain.handle('window-management-set-window-bounds', async (_event: any, options: any) => {
     try {
-      const { id, bounds, desktopId } = options;
-      if (!id) throw new Error('Missing window id');
-      ensureWindowManagerAccess();
+      const { id, bounds, desktopId } = options || {};
+      const normalizedId = String(id || '').trim();
+      if (!normalizedId) return false;
+      await ensureWindowManagerAccess();
 
+      let nextEntry: QueuedWindowMutation | null = null;
       if (bounds === 'fullscreen') {
         const { screen: electronScreen } = require('electron');
         const display = electronScreen.getDisplayNearestPoint(electronScreen.getCursorScreenPoint());
         const area = display?.workArea || electronScreen.getPrimaryDisplay().workArea;
-        const win = findNodeWindowById(String(id));
-        if (!win || typeof win.setBounds !== 'function') throw new Error('Window not found');
-        win.setBounds({ x: area.x, y: area.y, width: area.width, height: area.height });
+        nextEntry = {
+          id: normalizedId,
+          x: Math.round(Number(area?.x || 0)),
+          y: Math.round(Number(area?.y || 0)),
+          width: Math.max(1, Math.round(Number(area?.width || 1))),
+          height: Math.max(1, Math.round(Number(area?.height || 1))),
+        };
       } else {
-        // Set window position/size
-        const { position, size } = bounds;
+        const position = bounds?.position || {};
+        const size = bounds?.size || {};
 
-        // If desktopId specifies a different display, offset position to that display
+        // If desktopId specifies a different display, offset position to that display.
         let offsetX = 0;
         let offsetY = 0;
         if (desktopId) {
           const { screen: electronScreen } = require('electron');
           const displays = electronScreen.getAllDisplays();
-          const targetIndex = parseInt(desktopId) - 1;
+          const targetIndex = parseInt(desktopId, 10) - 1;
           if (targetIndex >= 0 && targetIndex < displays.length) {
             offsetX = displays[targetIndex].bounds.x;
             offsetY = displays[targetIndex].bounds.y;
           }
         }
 
-        const win = findNodeWindowById(String(id));
-        if (!win || typeof win.setBounds !== 'function') throw new Error('Window not found');
-        const currentBounds = typeof win.getBounds === 'function' ? win.getBounds() : null;
+        const win = await getNodeWindowById(normalizedId);
+        const currentBounds = win?.bounds || null;
         const baseX = Number(currentBounds?.x ?? 0);
         const baseY = Number(currentBounds?.y ?? 0);
         const baseWidth = Number(currentBounds?.width ?? 400);
         const baseHeight = Number(currentBounds?.height ?? 300);
 
-        const x = (position?.x ?? baseX) + offsetX;
-        const y = (position?.y ?? baseY) + offsetY;
-        const width = size?.width ?? baseWidth;
-        const height = size?.height ?? baseHeight;
+        const x = Number(position?.x ?? baseX) + offsetX;
+        const y = Number(position?.y ?? baseY) + offsetY;
+        const width = Number(size?.width ?? baseWidth);
+        const height = Number(size?.height ?? baseHeight);
 
-        win.setBounds({
+        if (![x, y, width, height].every((v) => Number.isFinite(v))) return false;
+        nextEntry = {
+          id: normalizedId,
           x: Math.round(x),
           y: Math.round(y),
           width: Math.max(1, Math.round(width)),
           height: Math.max(1, Math.round(height)),
-        });
+        };
       }
+
+      if (!nextEntry) return false;
+      return await queueWindowMutations([nextEntry]);
     } catch (error) {
       console.error('Failed to set window bounds:', error);
-      throw error;
+      return false;
     }
   });
 
   ipcMain.handle('window-management-set-window-layout', async (_event: any, items: WindowManagementLayoutItem[]) => {
     try {
-      ensureWindowManagerAccess();
+      await ensureWindowManagerAccess();
       const normalized = (Array.isArray(items) ? items : [])
         .map((entry) => {
           const id = String(entry?.id || '').trim();
@@ -9159,29 +9500,13 @@ return appURL's |path|() as text`,
             height: Math.max(1, Math.round(height)),
           };
         })
-        .filter(Boolean) as Array<{ id: string; x: number; y: number; width: number; height: number }>;
-      if (normalized.length === 0) return;
-      const windows = getNodeWindows();
-      const windowMap = new Map<string, any>();
-      windows.forEach((win) => {
-        const info = getNodeWindowInfo(win);
-        if (info?.id !== undefined) {
-          windowMap.set(String(info.id), win);
-        }
-      });
-      for (const entry of normalized) {
-        const win = windowMap.get(entry.id);
-        if (!win || typeof win.setBounds !== 'function') continue;
-        win.setBounds({
-          x: entry.x,
-          y: entry.y,
-          width: entry.width,
-          height: entry.height,
-        });
-      }
+        .filter(Boolean) as QueuedWindowMutation[];
+
+      if (normalized.length === 0) return false;
+      return await queueWindowMutations(normalized);
     } catch (error) {
       console.error('Failed to set window layout:', error);
-      throw error;
+      return false;
     }
   });
 
@@ -9619,6 +9944,15 @@ app.on('window-all-closed', () => {
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
+  if (windowManagerWorkerRestartTimer) {
+    clearTimeout(windowManagerWorkerRestartTimer);
+    windowManagerWorkerRestartTimer = null;
+  }
+  rejectAllWindowManagerWorkerPending('[WindowManager] App is quitting.');
+  if (windowManagerWorker) {
+    try { windowManagerWorker.kill('SIGKILL'); } catch {}
+    windowManagerWorker = null;
+  }
   clearAppUpdaterAutoCheckTimer();
   stopWhisperHoldWatcher();
   stopFnSpeakToggleWatcher();

@@ -365,7 +365,7 @@ export function getSystemCommandFallbackIcon(commandId: string): React.ReactNode
     );
   }
 
-  if (commandId === 'system-window-management') {
+  if (commandId === 'system-window-management' || commandId.startsWith('system-window-management-')) {
     return (
       <div className="w-5 h-5 rounded bg-cyan-500/20 flex items-center justify-center">
         <LayoutGrid className="w-3 h-3 text-cyan-200" />

@@ -310,8 +310,8 @@ export interface ElectronAPI {
   getWindowManagementContext: () => Promise<any>;
   getWindowsOnActiveDesktop: () => Promise<any[]>;
   getDesktops: () => Promise<any[]>;
-  setWindowBounds: (options: any) => Promise<void>;
-  setWindowLayout: (items: any[]) => Promise<void>;
+  setWindowBounds: (options: any) => Promise<boolean>;
+  setWindowLayout: (items: any[]) => Promise<boolean>;
   getWindowManagementSnapshot: () => Promise<any>;
 
   // Settings

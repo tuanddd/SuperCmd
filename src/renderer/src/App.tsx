@@ -16,7 +16,10 @@ import OnboardingExtension from './OnboardingExtension';
 import FileSearchExtension from './FileSearchExtension';
 import SuperCmdWhisper from './SuperCmdWhisper';
 import SuperCmdRead from './SuperCmdRead';
-import WindowManagerPanel from './WindowManagerPanel';
+import WindowManagerPanel, {
+  executeWindowManagementPresetCommandById,
+  isWindowManagementPresetCommandId,
+} from './WindowManagerPanel';
 import { tryCalculate, tryCalculateAsync } from './smart-calculator';
 import { useDetachedPortalWindow } from './useDetachedPortalWindow';
 import { useAppViewManager } from './hooks/useAppViewManager';
@@ -156,6 +159,7 @@ const App: React.FC = () => {
   const itemRefs = useRef<(HTMLDivElement | null)[]>([]);
   const actionsOverlayRef = useRef<HTMLDivElement>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
+  const windowPresetCommandQueueRef = useRef<Promise<void>>(Promise.resolve());
   const lastWindowHiddenAtRef = useRef<number>(0);
   const calcRequestSeqRef = useRef(0);
   const pinnedCommandsRef = useRef<string[]>([]);
@@ -1093,6 +1097,20 @@ const App: React.FC = () => {
     if (commandId === 'system-search-files') {
       whisperSessionRef.current = false;
       openFileSearch();
+      return true;
+    }
+    if (isWindowManagementPresetCommandId(commandId)) {
+      whisperSessionRef.current = false;
+      const queued = windowPresetCommandQueueRef.current.then(async () => {
+        const result = await executeWindowManagementPresetCommandById(commandId);
+        if (result.success && document.hasFocus()) {
+          try {
+            await window.electron.hideWindow();
+          } catch {}
+        }
+      });
+      windowPresetCommandQueueRef.current = queued.then(() => undefined, () => undefined);
+      await queued;
       return true;
     }
     if (commandId === 'system-window-management') {

@@ -51,6 +51,40 @@ interface WindowManagerPanelProps {
   onClose: () => void;
 }
 
+export type WindowManagementPresetCommand = {
+  commandId: string;
+  presetId: PresetId;
+};
+
+export const WINDOW_MANAGEMENT_PRESET_COMMANDS: WindowManagementPresetCommand[] = [
+  { commandId: 'system-window-management-left', presetId: 'left' },
+  { commandId: 'system-window-management-right', presetId: 'right' },
+  { commandId: 'system-window-management-top', presetId: 'top' },
+  { commandId: 'system-window-management-bottom', presetId: 'bottom' },
+  { commandId: 'system-window-management-center', presetId: 'center' },
+  { commandId: 'system-window-management-center-80', presetId: 'center-80' },
+  { commandId: 'system-window-management-fill', presetId: 'fill' },
+  { commandId: 'system-window-management-top-left', presetId: 'top-left' },
+  { commandId: 'system-window-management-top-right', presetId: 'top-right' },
+  { commandId: 'system-window-management-bottom-left', presetId: 'bottom-left' },
+  { commandId: 'system-window-management-bottom-right', presetId: 'bottom-right' },
+  { commandId: 'system-window-management-auto-organize', presetId: 'auto-organize' },
+  { commandId: 'system-window-management-increase-size-10', presetId: 'increase-size-10' },
+  { commandId: 'system-window-management-decrease-size-10', presetId: 'decrease-size-10' },
+  { commandId: 'system-window-management-increase-left-10', presetId: 'increase-left-10' },
+  { commandId: 'system-window-management-increase-right-10', presetId: 'increase-right-10' },
+  { commandId: 'system-window-management-increase-bottom-10', presetId: 'increase-bottom-10' },
+  { commandId: 'system-window-management-increase-top-10', presetId: 'increase-top-10' },
+  { commandId: 'system-window-management-move-up-10', presetId: 'move-up-10' },
+  { commandId: 'system-window-management-move-down-10', presetId: 'move-down-10' },
+  { commandId: 'system-window-management-move-left-10', presetId: 'move-left-10' },
+  { commandId: 'system-window-management-move-right-10', presetId: 'move-right-10' },
+];
+
+const WINDOW_MANAGEMENT_PRESET_BY_COMMAND_ID = new Map<string, PresetId>(
+  WINDOW_MANAGEMENT_PRESET_COMMANDS.map((item) => [item.commandId, item.presetId])
+);
+
 const PRESETS: Array<{ id: PresetId; label: string; subtitle: string }> = [
   { id: 'left', label: 'Left', subtitle: 'Current window' },
   { id: 'right', label: 'Right', subtitle: 'Current window' },
@@ -92,6 +126,9 @@ const SHIFT_ENTER_ONLY_PRESETS = new Set<PresetId>([
 const WINDOW_ADJUST_RATIO = 0.1;
 const MIN_WINDOW_WIDTH = 120;
 const MIN_WINDOW_HEIGHT = 60;
+const WINDOW_PRESET_EXECUTION_MIN_INTERVAL_MS = 64;
+let windowPresetExecutionQueue: Promise<void> = Promise.resolve();
+let lastWindowPresetExecutionAt = 0;
 
 function resolveIsDarkTheme(): boolean {
   if (typeof window === 'undefined' || typeof document === 'undefined') return true;
@@ -185,6 +222,10 @@ function normalizeText(value: unknown): string {
 
 function isShiftEnterOnlyPreset(presetId: PresetId): boolean {
   return SHIFT_ENTER_ONLY_PRESETS.has(presetId);
+}
+
+export function isWindowManagementPresetCommandId(commandId: string): boolean {
+  return WINDOW_MANAGEMENT_PRESET_BY_COMMAND_ID.has(String(commandId || '').trim());
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -804,6 +845,153 @@ function buildAutoFill4Layout(windows: ManagedWindow[], area: ScreenArea): Layou
   ];
 }
 
+function findBestTargetWindowForArea(windows: ManagedWindow[], area: ScreenArea): ManagedWindow | null {
+  const candidates = windows
+    .filter(isManageableWindow)
+    .filter((win) => isWindowOnScreenArea(win, area));
+  if (candidates.length === 0) return null;
+  const areaCenter = {
+    x: area.left + area.width / 2,
+    y: area.top + area.height / 2,
+  };
+  return [...candidates].sort((a, b) => {
+    const ac = getWindowCenter(a);
+    const bc = getWindowCenter(b);
+    const ad = Math.hypot(ac.x - areaCenter.x, ac.y - areaCenter.y);
+    const bd = Math.hypot(bc.x - areaCenter.x, bc.y - areaCenter.y);
+    return ad - bd;
+  })[0] || null;
+}
+
+async function resolveWindowManagementExecutionContext(): Promise<{ target: ManagedWindow | null; area: ScreenArea }> {
+  const hostArea = getHostMetrics(window);
+  let target: ManagedWindow | null = null;
+  let workAreaRaw: any = null;
+  try {
+    const ctx = await window.electron.getWindowManagementContext?.();
+    if (ctx) {
+      target = ctx.target as ManagedWindow | null;
+      workAreaRaw = ctx.workArea;
+    }
+  } catch {}
+  if (!target) {
+    try {
+      target = (await window.electron.getWindowManagementTargetWindow?.()) as ManagedWindow | null;
+    } catch {}
+  }
+  if (!target) {
+    try {
+      target = (await window.electron.getActiveWindow?.()) as ManagedWindow | null;
+    } catch {}
+  }
+  const area = normalizeScreenArea(workAreaRaw, hostArea);
+
+  if (target && !isManageableWindow(target)) {
+    target = null;
+  }
+
+  if (!target) {
+    try {
+      const windows = ((await window.electron.getWindowsOnActiveDesktop?.()) || []) as ManagedWindow[];
+      target = findBestTargetWindowForArea(windows, area);
+    } catch {}
+  }
+
+  return { target, area };
+}
+
+async function loadManageableWindowsOnArea(area: ScreenArea): Promise<ManagedWindow[]> {
+  let all: ManagedWindow[] = [];
+  try {
+    all = ((await window.electron.getWindowsOnActiveDesktop()) || []) as ManagedWindow[];
+  } catch {
+    all = [];
+  }
+  return all
+    .filter(isManageableWindow)
+    .filter((win) => isWindowOnScreenArea(win, area));
+}
+
+export async function executeWindowManagementPreset(presetId: PresetId): Promise<{ success: boolean; error?: string }> {
+  const run = async (): Promise<{ success: boolean; error?: string }> => {
+    const elapsed = Date.now() - lastWindowPresetExecutionAt;
+    if (elapsed < WINDOW_PRESET_EXECUTION_MIN_INTERVAL_MS) {
+      await new Promise((resolve) => setTimeout(resolve, WINDOW_PRESET_EXECUTION_MIN_INTERVAL_MS - elapsed));
+    }
+    try {
+      const isMultiWindow = MULTI_WINDOW_PRESETS.has(presetId);
+      const requiresShiftEnter = isShiftEnterOnlyPreset(presetId);
+      const context = await resolveWindowManagementExecutionContext();
+      const layoutArea = context.area;
+      const windows = isMultiWindow ? await loadManageableWindowsOnArea(layoutArea) : [];
+      const target = context.target ?? null;
+      const layoutWindows = isMultiWindow ? windows : (target ? [target] : []);
+
+      if (requiresShiftEnter && !target) {
+        return { success: false, error: 'No target window found.' };
+      }
+      if (!requiresShiftEnter && layoutWindows.length === 0) {
+        return {
+          success: false,
+          error: isMultiWindow ? 'No movable windows found on this screen.' : 'No target window found.',
+        };
+      }
+
+      const orderedAll = sortWindowsForLayout(layoutWindows);
+      const layoutTargets = presetId === 'auto-organize' ? orderedAll.slice(0, 4) : orderedAll;
+      let moves: LayoutMove[] = [];
+
+      if (requiresShiftEnter && target) {
+        const adjusted = applyFineTunePreset(presetId, target, layoutArea);
+        if (adjusted) {
+          moves = [{ id: target.id, bounds: rectToBounds(adjusted) }];
+        }
+      } else if (isMultiWindow) {
+        if (presetId === 'auto-organize') {
+          moves = buildAutoOrganizeLayout(layoutTargets, layoutArea);
+        } else {
+          moves = buildAutoLayout(layoutTargets, layoutArea);
+        }
+      } else {
+        const region = getPresetRegion(presetId, layoutArea);
+        if (region && target) {
+          const adjusted = (presetId === 'bottom-left' || presetId === 'bottom-right')
+            ? pushUpIfOverflow(region, layoutArea, target)
+            : region;
+          moves = [{ id: target.id, bounds: rectToBounds(adjusted) }];
+        }
+      }
+
+      if (moves.length === 0) {
+        return { success: false, error: 'No windows to move.' };
+      }
+
+      const applied = await window.electron.setWindowLayout(moves);
+      if (applied === false) {
+        return { success: false, error: 'Window action failed. Try again.' };
+      }
+      return { success: true };
+    } catch (error) {
+      console.error('Failed to execute window management preset:', error);
+      return { success: false, error: 'Failed to move windows. Check Accessibility permission.' };
+    } finally {
+      lastWindowPresetExecutionAt = Date.now();
+    }
+  };
+
+  const queued = windowPresetExecutionQueue.then(run, run);
+  windowPresetExecutionQueue = queued.then(() => undefined, () => undefined);
+  return queued;
+}
+
+export async function executeWindowManagementPresetCommandById(commandId: string): Promise<{ success: boolean; error?: string }> {
+  const presetId = WINDOW_MANAGEMENT_PRESET_BY_COMMAND_ID.get(String(commandId || '').trim());
+  if (!presetId) {
+    return { success: false, error: 'Unknown window management command.' };
+  }
+  return executeWindowManagementPreset(presetId);
+}
+
 const WindowManagerPanel: React.FC<WindowManagerPanelProps> = ({ show, portalTarget, onClose }) => {
   const [windowsOnScreen, setWindowsOnScreen] = useState<ManagedWindow[]>([]);
   const [statusText, setStatusText] = useState('Select a preset to arrange windows.');
@@ -1063,7 +1251,13 @@ const WindowManagerPanel: React.FC<WindowManagerPanelProps> = ({ show, portalTar
 
     const seq = ++previewSeqRef.current;
     try {
-      await window.electron.setWindowLayout(moves);
+      const applied = await window.electron.setWindowLayout(moves);
+      if (applied === false) {
+        if (seq === previewSeqRef.current) {
+          setStatusText('Window action failed. Try again.');
+        }
+        return;
+      }
       if (seq !== previewSeqRef.current) return;
       setAppliedPreset(presetId);
       if (isMultiWindow) {
@@ -1527,14 +1721,14 @@ const WindowManagerPanel: React.FC<WindowManagerPanelProps> = ({ show, portalTar
                       <div
                         style={{
                           fontSize: 9.5,
-                          color: isApplied ? colors.liveOn : colors.liveOff,
+                          color: isApplied && !requiresShiftEnter ? colors.liveOn : colors.liveOff,
                           letterSpacing: 0.25,
                           textTransform: 'uppercase',
                           minWidth: 24,
                           textAlign: 'right',
                         }}
                       >
-                        {isApplied ? 'live' : ''}
+                        {isApplied && !requiresShiftEnter ? 'live' : ''}
                       </div>
                     </div>
                   </div>
