@@ -1219,8 +1219,6 @@ const WINDOW_MANAGEMENT_PRESET_COMMAND_IDS = new Set<string>([
   'system-window-management-center',
   'system-window-management-center-80',
   'system-window-management-fill',
-  'system-window-management-next-display',
-  'system-window-management-prev-display',
   'system-window-management-top-left',
   'system-window-management-top-right',
   'system-window-management-bottom-left',

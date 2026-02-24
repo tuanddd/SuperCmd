@@ -182,7 +182,7 @@ const App: React.FC = () => {
   const windowManagerPortalTarget = useDetachedPortalWindow(showWindowManager, {
     name: 'supercmd-window-manager-window',
     title: 'SuperCmd Window Manager',
-    width: 320,
+    width: 380,
     height: 276,
     anchor: 'top-right',
     onClosed: () => {

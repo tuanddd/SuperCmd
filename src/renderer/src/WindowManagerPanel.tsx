@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { onThemeChange } from './utils/theme';
+import type { AppSettings } from '../types/electron';
+import { formatShortcutLabel } from './utils/command-helpers';
 
 type BoundsRect = {
   position: { x: number; y: number };
@@ -28,8 +30,6 @@ type PresetId =
   | 'center'
   | 'center-80'
   | 'fill'
-  | 'next-display'
-  | 'prev-display'
   | 'auto-organize'
   | 'increase-size-10'
   | 'decrease-size-10'
@@ -89,12 +89,13 @@ export const WINDOW_MANAGEMENT_PRESET_COMMANDS: WindowManagementPresetCommand[] 
   { commandId: 'system-window-management-move-down-10', presetId: 'move-down-10' },
   { commandId: 'system-window-management-move-left-10', presetId: 'move-left-10' },
   { commandId: 'system-window-management-move-right-10', presetId: 'move-right-10' },
-  { commandId: 'system-window-management-next-display', presetId: 'next-display' },
-  { commandId: 'system-window-management-prev-display', presetId: 'prev-display' },
 ];
 
 const WINDOW_MANAGEMENT_PRESET_BY_COMMAND_ID = new Map<string, PresetId>(
   WINDOW_MANAGEMENT_PRESET_COMMANDS.map((item) => [item.commandId, item.presetId])
+);
+const WINDOW_MANAGEMENT_COMMAND_ID_BY_PRESET = new Map<PresetId, string>(
+  WINDOW_MANAGEMENT_PRESET_COMMANDS.map((item) => [item.presetId, item.commandId])
 );
 
 const PRESETS: Array<{ id: PresetId; label: string; subtitle: string }> = [
@@ -124,8 +125,6 @@ const PRESETS: Array<{ id: PresetId; label: string; subtitle: string }> = [
   { id: 'move-down-10', label: 'Move down by 10%', subtitle: 'Current window' },
   { id: 'move-left-10', label: 'Move left by 10%', subtitle: 'Current window' },
   { id: 'move-right-10', label: 'Move right by 10%', subtitle: 'Current window' },
-  { id: 'next-display', label: 'Next Display', subtitle: 'Current window' },
-  { id: 'prev-display', label: 'Previous Display', subtitle: 'Current window' },
 ];
 
 const MULTI_WINDOW_PRESETS = new Set<PresetId>(['auto-organize']);
@@ -714,143 +713,6 @@ function getPresetRegion(presetId: PresetId, area: ScreenArea): Rect | null {
   return null;
 }
 
-type DesktopArea = {
-  id: string;
-  active: boolean;
-  bounds: ScreenArea;
-  workArea: ScreenArea;
-};
-
-function isDisplaySwitchPreset(presetId: PresetId): presetId is 'next-display' | 'prev-display' {
-  return presetId === 'next-display' || presetId === 'prev-display';
-}
-
-function toArea(raw: any, fallbackLeft = 0, fallbackTop = 0): ScreenArea | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const left = Number(raw?.x ?? raw?.left ?? fallbackLeft);
-  const top = Number(raw?.y ?? raw?.top ?? fallbackTop);
-  const width = Number(raw?.width);
-  const height = Number(raw?.height);
-  if (![left, top, width, height].every((value) => Number.isFinite(value))) return null;
-  return {
-    left: Math.round(left),
-    top: Math.round(top),
-    width: Math.max(1, Math.round(width)),
-    height: Math.max(1, Math.round(height)),
-  };
-}
-
-function normalizeDesktopArea(raw: any): DesktopArea | null {
-  const id = normalizeText(raw?.id);
-  if (!id) return null;
-  const bounds =
-    toArea(raw?.bounds) ||
-    toArea(raw?.workArea) ||
-    (() => {
-      const width = Number(raw?.size?.width);
-      const height = Number(raw?.size?.height);
-      if (![width, height].every((value) => Number.isFinite(value))) return null;
-      return { left: 0, top: 0, width: Math.max(1, Math.round(width)), height: Math.max(1, Math.round(height)) };
-    })();
-  if (!bounds) return null;
-  const workArea = toArea(raw?.workArea, bounds.left, bounds.top) || bounds;
-  return {
-    id,
-    active: Boolean(raw?.active),
-    bounds,
-    workArea,
-  };
-}
-
-function areaContainsPoint(area: ScreenArea, x: number, y: number): boolean {
-  return x >= area.left && x < area.left + area.width && y >= area.top && y < area.top + area.height;
-}
-
-function areAreasClose(a: ScreenArea, b: ScreenArea): boolean {
-  return (
-    Math.abs(a.left - b.left) <= 2 &&
-    Math.abs(a.top - b.top) <= 2 &&
-    Math.abs(a.width - b.width) <= 2 &&
-    Math.abs(a.height - b.height) <= 2
-  );
-}
-
-async function moveTargetToAdjacentDisplay(
-  presetId: 'next-display' | 'prev-display',
-  target: ManagedWindow,
-  currentArea: ScreenArea
-): Promise<{ success: boolean; error?: string }> {
-  const targetRect = getWindowRect(target);
-  if (!targetRect) return { success: false, error: 'No target window found.' };
-  if (!target.id) return { success: false, error: 'No target window found.' };
-
-  let rawDesktops: any[] = [];
-  try {
-    rawDesktops = ((await window.electron.getDesktops?.()) || []) as any[];
-  } catch {}
-
-  const desktops = rawDesktops.map((desktop) => normalizeDesktopArea(desktop)).filter(Boolean) as DesktopArea[];
-  desktops.sort((a, b) => {
-    if (a.bounds.left !== b.bounds.left) return a.bounds.left - b.bounds.left;
-    if (a.bounds.top !== b.bounds.top) return a.bounds.top - b.bounds.top;
-    return Number(a.id) - Number(b.id);
-  });
-  if (desktops.length <= 1) {
-    return { success: false, error: 'No other display found.' };
-  }
-
-  const centerX = targetRect.x + targetRect.width / 2;
-  const centerY = targetRect.y + targetRect.height / 2;
-  let sourceIndex = desktops.findIndex((desktop) => areaContainsPoint(desktop.bounds, centerX, centerY));
-  if (sourceIndex < 0) {
-    sourceIndex = desktops.findIndex((desktop) => areAreasClose(desktop.workArea, currentArea));
-  }
-  if (sourceIndex < 0) {
-    sourceIndex = desktops.findIndex((desktop) => desktop.active);
-  }
-  if (sourceIndex < 0) sourceIndex = 0;
-
-  const delta = presetId === 'next-display' ? 1 : -1;
-  const destinationIndex = (sourceIndex + delta + desktops.length) % desktops.length;
-  if (destinationIndex === sourceIndex) {
-    return { success: false, error: 'No other display found.' };
-  }
-
-  const source = desktops[sourceIndex];
-  const destination = desktops[destinationIndex];
-  const nextWidth = Math.max(MIN_WINDOW_WIDTH, Math.min(targetRect.width, destination.workArea.width));
-  const nextHeight = Math.max(MIN_WINDOW_HEIGHT, Math.min(targetRect.height, destination.workArea.height));
-
-  const sourceRangeX = Math.max(0, source.workArea.width - targetRect.width);
-  const sourceRangeY = Math.max(0, source.workArea.height - targetRect.height);
-  const sourceOffsetX = clamp(targetRect.x - source.workArea.left, 0, sourceRangeX);
-  const sourceOffsetY = clamp(targetRect.y - source.workArea.top, 0, sourceRangeY);
-  const ratioX = sourceRangeX > 0 ? sourceOffsetX / sourceRangeX : 0;
-  const ratioY = sourceRangeY > 0 ? sourceOffsetY / sourceRangeY : 0;
-
-  const destinationRangeX = Math.max(0, destination.workArea.width - nextWidth);
-  const destinationRangeY = Math.max(0, destination.workArea.height - nextHeight);
-  const absoluteX = destination.workArea.left + Math.round(destinationRangeX * ratioX);
-  const absoluteY = destination.workArea.top + Math.round(destinationRangeY * ratioY);
-
-  const applied = await window.electron.setWindowLayout([
-    {
-      id: target.id,
-      bounds: rectToBounds({
-        x: absoluteX,
-        y: absoluteY,
-        width: nextWidth,
-        height: nextHeight,
-      }),
-    },
-  ]);
-
-  if (applied === false) {
-    return { success: false, error: 'Window action failed. Try again.' };
-  }
-  return { success: true };
-}
-
 function sortWindowsForLayout(windows: ManagedWindow[]): ManagedWindow[] {
   return [...windows].sort((a, b) => {
     const ay = Number(a.bounds?.position?.y || 0);
@@ -1134,13 +996,6 @@ export async function executeWindowManagementPreset(presetId: PresetId): Promise
         };
       }
 
-      if (isDisplaySwitchPreset(presetId)) {
-        if (!target) {
-          return { success: false, error: 'No target window found.' };
-        }
-        return await moveTargetToAdjacentDisplay(presetId, target, layoutArea);
-      }
-
       const orderedAll = sortWindowsForLayout(layoutWindows);
       const layoutTargets = presetId === 'auto-organize' ? orderedAll.slice(0, 4) : orderedAll;
       let moves: LayoutMove[] = [];
@@ -1203,6 +1058,7 @@ const WindowManagerPanel: React.FC<WindowManagerPanelProps> = ({ show, portalTar
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const [appliedPreset, setAppliedPreset] = useState<PresetId | null>(null);
   const [isDarkTheme, setIsDarkTheme] = useState<boolean>(() => resolveIsDarkTheme());
+  const [commandHotkeyLabels, setCommandHotkeyLabels] = useState<Record<string, string>>({});
 
   const windowsOnScreenRef = useRef<ManagedWindow[]>([]);
   const previewSeqRef = useRef(0);
@@ -1252,6 +1108,30 @@ const WindowManagerPanel: React.FC<WindowManagerPanelProps> = ({ show, portalTar
       window.removeEventListener('focus', onFocus);
     };
   }, []);
+
+  useEffect(() => {
+    if (!show) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const settings = (await window.electron.getSettings?.()) as AppSettings;
+        const next: Record<string, string> = {};
+        const hotkeys = settings?.commandHotkeys || {};
+        for (const [commandId, rawShortcut] of Object.entries(hotkeys)) {
+          const id = String(commandId || '').trim();
+          const shortcut = String(rawShortcut || '').trim();
+          if (!id || !shortcut) continue;
+          next[id] = formatShortcutLabel(shortcut);
+        }
+        if (!cancelled) setCommandHotkeyLabels(next);
+      } catch {
+        if (!cancelled) setCommandHotkeyLabels({});
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [show]);
 
   const hostWindow = portalTarget?.ownerDocument?.defaultView || null;
   const hostArea = useMemo(() => getHostMetrics(hostWindow), [hostWindow]);
@@ -1422,23 +1302,6 @@ const WindowManagerPanel: React.FC<WindowManagerPanelProps> = ({ show, portalTar
     const previewKey = `${presetId}:${previewIds.join(',')}`;
     if (!options?.force && lastPreviewKeyRef.current === previewKey) return;
     lastPreviewKeyRef.current = previewKey;
-
-    if (isDisplaySwitchPreset(presetId)) {
-      if (!target) {
-        setStatusText('No target window found.');
-        return;
-      }
-      const seq = ++previewSeqRef.current;
-      const result = await moveTargetToAdjacentDisplay(presetId, target, layoutArea);
-      if (seq !== previewSeqRef.current) return;
-      if (!result.success) {
-        setStatusText(result.error || 'Window action failed. Try again.');
-        return;
-      }
-      setAppliedPreset(presetId);
-      setStatusText(presetId === 'next-display' ? 'Moved window to next display.' : 'Moved window to previous display.');
-      return;
-    }
 
     let moves: LayoutMove[] = [];
     let movedCount = layoutTargets.length;
@@ -1871,9 +1734,13 @@ const WindowManagerPanel: React.FC<WindowManagerPanelProps> = ({ show, portalTar
                 </div>
               ) : filteredPresets.map((preset, index) => {
                 const isSelected = index === selectedIndex;
-                const isApplied = appliedPreset === preset.id;
                 const requiresShiftEnter = isShiftEnterOnlyPreset(preset.id);
                 const iconColor = isSelected ? colors.iconSelected : colors.iconDefault;
+                const commandId = WINDOW_MANAGEMENT_COMMAND_ID_BY_PRESET.get(preset.id) || '';
+                const configuredHotkey = commandId ? String(commandHotkeyLabels[commandId] || '') : '';
+                const showShiftBadge = requiresShiftEnter;
+                const showHotkeyBadge = Boolean(configuredHotkey);
+                const showShortcutBadgeGroup = showShiftBadge || showHotkeyBadge;
                 return (
                   <div
                     key={preset.id}
@@ -1923,35 +1790,56 @@ const WindowManagerPanel: React.FC<WindowManagerPanelProps> = ({ show, portalTar
                       <div style={{ fontSize: 12, fontWeight: 600, color: colors.rowText }}>{preset.label}</div>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
-                      {requiresShiftEnter ? (
-                        <span
-                          title="Run with Shift+Enter"
-                          style={{
-                            fontSize: 9.5,
-                            color: colors.liveOff,
-                            letterSpacing: 0.2,
-                            padding: '2px 6px',
-                            borderRadius: 999,
-                            border: colors.controlBorder,
-                            background: colors.controlBg,
-                            boxShadow: colors.controlShadow,
-                          }}
-                        >
-                          ⇧ + ↩
-                        </span>
+                      {showShortcutBadgeGroup ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>
+                          {showShiftBadge ? (
+                            <span
+                              title={showHotkeyBadge ? 'Run with Shift+Enter or assigned shortcut' : 'Run with Shift+Enter'}
+                              style={{
+                                fontSize: 9.5,
+                                color: colors.liveOff,
+                                letterSpacing: 0.2,
+                                padding: '2px 6px',
+                                borderRadius: 999,
+                                border: colors.controlBorder,
+                                background: colors.controlBg,
+                                boxShadow: colors.controlShadow,
+                              }}
+                            >
+                              ⇧ + ↩
+                            </span>
+                          ) : null}
+                          {showShiftBadge && showHotkeyBadge ? (
+                            <span
+                              style={{
+                                fontSize: 8.5,
+                                color: colors.footerMuted,
+                                letterSpacing: 0.25,
+                                textTransform: 'uppercase',
+                              }}
+                            >
+                              OR
+                            </span>
+                          ) : null}
+                          {showHotkeyBadge ? (
+                            <span
+                              title="Assigned shortcut"
+                              style={{
+                                fontSize: 9.5,
+                                color: colors.liveOff,
+                                letterSpacing: 0.2,
+                                padding: '2px 6px',
+                                borderRadius: 999,
+                                border: colors.controlBorder,
+                                background: colors.controlBg,
+                                boxShadow: colors.controlShadow,
+                              }}
+                            >
+                              {configuredHotkey}
+                            </span>
+                          ) : null}
+                        </div>
                       ) : null}
-                      <div
-                        style={{
-                          fontSize: 9.5,
-                          color: isApplied && !requiresShiftEnter ? colors.liveOn : colors.liveOff,
-                          letterSpacing: 0.25,
-                          textTransform: 'uppercase',
-                          minWidth: 24,
-                          textAlign: 'right',
-                        }}
-                      >
-                        {isApplied && !requiresShiftEnter ? 'live' : ''}
-                      </div>
                     </div>
                   </div>
                 );

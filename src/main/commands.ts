@@ -1085,18 +1085,6 @@ async function discoverAndBuildCommands(): Promise<CommandInfo[]> {
       category: 'system',
     },
     {
-      id: 'system-window-management-next-display',
-      title: 'Window: Next Display',
-      keywords: ['window', 'management', 'next', 'display', 'monitor', 'screen'],
-      category: 'system',
-    },
-    {
-      id: 'system-window-management-prev-display',
-      title: 'Window: Previous Display',
-      keywords: ['window', 'management', 'previous', 'prev', 'display', 'monitor', 'screen'],
-      category: 'system',
-    },
-    {
       id: 'system-open-extensions-settings',
       title: 'SuperCmd Extensions',
       keywords: ['extensions', 'store', 'community', 'hotkey', 'supercmd'],
