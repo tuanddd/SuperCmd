@@ -21,6 +21,10 @@ contextBridge.exposeInMainWorld('electron', {
   getCommands: (): Promise<any[]> => ipcRenderer.invoke('get-commands'),
   executeCommand: (commandId: string): Promise<boolean> =>
     ipcRenderer.invoke('execute-command', commandId),
+  executeCommandAsHotkey: (commandId: string): Promise<boolean> =>
+    ipcRenderer.invoke('execute-command-as-hotkey', commandId),
+  executeCommandFromWidget: (commandId: string): Promise<boolean> =>
+    ipcRenderer.invoke('execute-command-from-widget', commandId),
   hideWindow: (): Promise<void> => ipcRenderer.invoke('hide-window'),
   openDevTools: (): Promise<boolean> => ipcRenderer.invoke('open-devtools'),
   closePromptWindow: (): Promise<void> => ipcRenderer.invoke('close-prompt-window'),

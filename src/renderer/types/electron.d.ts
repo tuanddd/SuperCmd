@@ -257,6 +257,8 @@ export interface ElectronAPI {
   // Launcher
   getCommands: () => Promise<CommandInfo[]>;
   executeCommand: (commandId: string) => Promise<boolean>;
+  executeCommandAsHotkey: (commandId: string) => Promise<boolean>;
+  executeCommandFromWidget: (commandId: string) => Promise<boolean>;
   hideWindow: () => Promise<void>;
   openDevTools: () => Promise<boolean>;
   closePromptWindow: () => Promise<void>;

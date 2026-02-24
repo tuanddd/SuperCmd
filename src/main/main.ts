@@ -5772,7 +5772,7 @@ function isAISectionDisabledForCommand(commandId: string, settings?: AppSettings
   return false;
 }
 
-async function runCommandById(commandId: string, source: 'launcher' | 'hotkey' = 'launcher'): Promise<boolean> {
+async function runCommandById(commandId: string, source: 'launcher' | 'hotkey' | 'widget' = 'launcher'): Promise<boolean> {
   if (isAIDependentSystemCommand(commandId) && isAIDisabledInSettings()) {
     return false;
   }
@@ -6030,7 +6030,7 @@ async function runCommandById(commandId: string, source: 'launcher' | 'hotkey' =
     return await openLauncherAndRunSystemCommand(commandId, {
       showWindow: false,
       mode: launcherMode === 'onboarding' ? 'onboarding' : 'default',
-      preserveFocusWhenHidden: true,
+      preserveFocusWhenHidden: source !== 'widget',
     });
   }
   if (isWindowManagementFineTuneCommand(commandId)) {
@@ -6086,7 +6086,7 @@ async function runCommandById(commandId: string, source: 'launcher' | 'hotkey' =
     return await openLauncherAndRunSystemCommand(commandId, {
       showWindow: false,
       mode: launcherMode === 'onboarding' ? 'onboarding' : 'default',
-      preserveFocusWhenHidden: true,
+      preserveFocusWhenHidden: source !== 'widget',
     });
   }
   if (isWindowManagementSystemCommand(commandId)) {
@@ -7753,6 +7753,20 @@ app.whenReady().then(async () => {
     'execute-command',
     async (_event: any, commandId: string) => {
       return await runCommandById(commandId, 'launcher');
+    }
+  );
+
+  ipcMain.handle(
+    'execute-command-as-hotkey',
+    async (_event: any, commandId: string) => {
+      return await runCommandById(commandId, 'hotkey');
+    }
+  );
+
+  ipcMain.handle(
+    'execute-command-from-widget',
+    async (_event: any, commandId: string) => {
+      return await runCommandById(commandId, 'widget');
     }
   );
 
