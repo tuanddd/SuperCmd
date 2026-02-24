@@ -167,7 +167,7 @@ export interface AppSettings {
   ai: AISettings;
   commandMetadata?: Record<string, { subtitle?: string }>;
   debugMode: boolean;
-  fontSize: 'small' | 'medium' | 'large';
+  fontSize: 'extra-small' | 'small' | 'medium' | 'large' | 'extra-large';
   uiStyle: 'default' | 'glassy';
   baseColor: string;
   appUpdaterLastCheckedAt: number;
