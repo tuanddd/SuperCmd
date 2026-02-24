@@ -46,6 +46,7 @@ private struct TargetHint {
   var bundleId: String?
   var appPath: String?
   var windowId: Int?
+  var workArea: CGRect?
 }
 
 private let adjustRatio: CGFloat = 0.1
@@ -158,11 +159,6 @@ private func focusedWindowElement(in appElement: AXUIElement, preferredWindowId:
     }
   }
 
-  if preferredWindowId != nil {
-    // Do not silently pick a different window when a specific target was requested.
-    return nil
-  }
-
   if let focusedRaw = copyAttribute(appElement, kAXFocusedWindowAttribute as CFString),
      CFGetTypeID(focusedRaw) == AXUIElementGetTypeID() {
     let focused = unsafeBitCast(focusedRaw, to: AXUIElement.self)
@@ -190,7 +186,33 @@ private func focusedWindowElement(in appElement: AXUIElement, preferredWindowId:
   return nil
 }
 
+private func runningApp(forWindowId windowId: Int) -> NSRunningApplication? {
+  guard windowId > 0 else { return nil }
+  guard let windowInfoList = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] else {
+    return nil
+  }
+  for entry in windowInfoList {
+    guard let number = entry[kCGWindowNumber as String] as? NSNumber, number.intValue == windowId else {
+      continue
+    }
+    guard let ownerPidRaw = entry[kCGWindowOwnerPID as String] as? NSNumber else {
+      continue
+    }
+    let pid = pid_t(ownerPidRaw.int32Value)
+    if pid <= 0 { continue }
+    if let app = NSRunningApplication(processIdentifier: pid), !app.isTerminated {
+      return app
+    }
+  }
+  return nil
+}
+
 private func runningApp(for hint: TargetHint) -> NSRunningApplication? {
+  if let windowId = hint.windowId,
+     let app = runningApp(forWindowId: windowId) {
+    return app
+  }
+
   let normalizedBundleId = hint.bundleId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
   if !normalizedBundleId.isEmpty {
     let matches = NSRunningApplication.runningApplications(withBundleIdentifier: normalizedBundleId)
@@ -227,10 +249,15 @@ private func runningApp(for hint: TargetHint) -> NSRunningApplication? {
 }
 
 private func focusedWindowElement(targetHint: TargetHint?) -> AXUIElement? {
-  if let targetHint, let app = runningApp(for: targetHint) {
-    let appElement = AXUIElementCreateApplication(app.processIdentifier)
-    if let win = focusedWindowElement(in: appElement, preferredWindowId: targetHint.windowId) {
-      return win
+  if let targetHint {
+    if let app = runningApp(for: targetHint) {
+      let appElement = AXUIElementCreateApplication(app.processIdentifier)
+      if let win = focusedWindowElement(in: appElement, preferredWindowId: targetHint.windowId) {
+        return win
+      }
+      if let win = focusedWindowElement(in: appElement, preferredWindowId: nil) {
+        return win
+      }
     }
   }
 
@@ -278,21 +305,79 @@ private func setWindowFrame(_ window: AXUIElement, frame: WindowFrame) -> Bool {
   return pointStatus == .success && sizeStatus == .success
 }
 
-private func screenVisibleArea(for frame: WindowFrame) -> CGRect? {
-  let center = CGPoint(x: frame.x + frame.width * 0.5, y: frame.y + frame.height * 0.5)
-  for screen in NSScreen.screens {
-    if screen.visibleFrame.contains(center) || screen.frame.contains(center) {
-      return screen.visibleFrame
+private func bestDisplayId(for rect: CGRect) -> CGDirectDisplayID? {
+  guard
+    !rect.isNull,
+    !rect.isInfinite,
+    rect.width.isFinite,
+    rect.height.isFinite,
+    rect.origin.x.isFinite,
+    rect.origin.y.isFinite,
+    rect.width > 0,
+    rect.height > 0
+  else {
+    return nil
+  }
+
+  var displayIDs = [CGDirectDisplayID](repeating: 0, count: 32)
+  var displayCount: UInt32 = 0
+  let status = CGGetActiveDisplayList(UInt32(displayIDs.count), &displayIDs, &displayCount)
+  guard status == .success, displayCount > 0 else { return nil }
+
+  var bestDisplay: CGDirectDisplayID?
+  var bestArea: CGFloat = -1
+  for index in 0..<Int(displayCount) {
+    let displayId = displayIDs[index]
+    let displayBounds = CGDisplayBounds(displayId)
+    let intersection = displayBounds.intersection(rect)
+    let area = intersection.isNull ? 0 : (intersection.width * intersection.height)
+    if area > bestArea {
+      bestArea = area
+      bestDisplay = displayId
     }
   }
-  if let main = NSScreen.main?.visibleFrame {
-    return main
-  }
-  return NSScreen.screens.first?.visibleFrame
+  return bestDisplay
 }
 
-private func adjustedFrame(_ base: WindowFrame, action: AdjustAction) -> WindowFrame {
-  let area = screenVisibleArea(for: base)
+private func displayBounds(for rect: CGRect) -> CGRect? {
+  if let displayId = bestDisplayId(for: rect) {
+    return CGDisplayBounds(displayId)
+  }
+  let mainDisplay = CGMainDisplayID()
+  let bounds = CGDisplayBounds(mainDisplay)
+  if bounds.width > 0, bounds.height > 0 {
+    return bounds
+  }
+  return nil
+}
+
+private func screenVisibleArea(for frame: WindowFrame) -> CGRect? {
+  let rect = CGRect(x: frame.x, y: frame.y, width: frame.width, height: frame.height)
+  return displayBounds(for: rect)
+}
+
+private func visibleArea(forWindowId windowId: Int) -> CGRect? {
+  guard windowId > 0 else { return nil }
+  guard let windowInfoList = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] else {
+    return nil
+  }
+  guard let entry = windowInfoList.first(where: { row in
+    guard let number = row[kCGWindowNumber as String] as? NSNumber else { return false }
+    return number.intValue == windowId
+  }) else {
+    return nil
+  }
+  guard let boundsDict = entry[kCGWindowBounds as String] as? NSDictionary,
+        let windowBounds = CGRect(dictionaryRepresentation: boundsDict) else {
+    return nil
+  }
+  return displayBounds(for: windowBounds)
+}
+
+private func adjustedFrame(_ base: WindowFrame, action: AdjustAction, forcedArea: CGRect?, preferredWindowId: Int?) -> WindowFrame {
+  let area = (preferredWindowId != nil ? visibleArea(forWindowId: preferredWindowId!) : nil)
+    ?? screenVisibleArea(for: base)
+    ?? forcedArea
   let stepX = max(1, round(base.width * adjustRatio))
   let stepY = max(1, round(base.height * adjustRatio))
   var next = base
@@ -518,8 +603,12 @@ private func run() {
     return
   }
 
-  var targetHint = TargetHint(bundleId: nil, appPath: nil, windowId: nil)
+  var targetHint = TargetHint(bundleId: nil, appPath: nil, windowId: nil, workArea: nil)
   var index = 1
+  var areaX: CGFloat?
+  var areaY: CGFloat?
+  var areaWidth: CGFloat?
+  var areaHeight: CGFloat?
   while index < args.count {
     let key = args[index]
     if key == "--bundle-id", index + 1 < args.count {
@@ -540,7 +629,36 @@ private func run() {
       index += 2
       continue
     }
+    if key == "--area-x", index + 1 < args.count {
+      let value = args[index + 1].trimmingCharacters(in: .whitespacesAndNewlines)
+      areaX = CGFloat(Double(value) ?? 0)
+      index += 2
+      continue
+    }
+    if key == "--area-y", index + 1 < args.count {
+      let value = args[index + 1].trimmingCharacters(in: .whitespacesAndNewlines)
+      areaY = CGFloat(Double(value) ?? 0)
+      index += 2
+      continue
+    }
+    if key == "--area-width", index + 1 < args.count {
+      let value = args[index + 1].trimmingCharacters(in: .whitespacesAndNewlines)
+      areaWidth = CGFloat(Double(value) ?? 0)
+      index += 2
+      continue
+    }
+    if key == "--area-height", index + 1 < args.count {
+      let value = args[index + 1].trimmingCharacters(in: .whitespacesAndNewlines)
+      areaHeight = CGFloat(Double(value) ?? 0)
+      index += 2
+      continue
+    }
     index += 1
+  }
+
+  if let x = areaX, let y = areaY, let width = areaWidth, let height = areaHeight,
+     width > 0, height > 0 {
+    targetHint.workArea = CGRect(x: x, y: y, width: width, height: height)
   }
 
   guard AXIsProcessTrusted() else {
@@ -558,7 +676,12 @@ private func run() {
     return
   }
 
-  let next = adjustedFrame(base, action: action)
+  let next = adjustedFrame(
+    base,
+    action: action,
+    forcedArea: targetHint.workArea,
+    preferredWindowId: targetHint.windowId
+  )
   guard setWindowFrame(window, frame: next) else {
     emit(ok: false, error: "set_window_frame_failed")
     return
