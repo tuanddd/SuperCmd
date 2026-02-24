@@ -3,6 +3,17 @@ import ApplicationServices
 import Foundation
 
 private enum AdjustAction: String {
+  case left = "left"
+  case right = "right"
+  case top = "top"
+  case bottom = "bottom"
+  case center = "center"
+  case center80 = "center-80"
+  case fill = "fill"
+  case topLeft = "top-left"
+  case topRight = "top-right"
+  case bottomLeft = "bottom-left"
+  case bottomRight = "bottom-right"
   case increaseSize10 = "increase-size-10"
   case decreaseSize10 = "decrease-size-10"
   case increaseLeft10 = "increase-left-10"
@@ -29,6 +40,12 @@ private struct WindowFrame {
 private struct OutputPayload: Encodable {
   let ok: Bool
   let error: String?
+}
+
+private struct TargetHint {
+  var bundleId: String?
+  var appPath: String?
+  var windowId: Int?
 }
 
 private let adjustRatio: CGFloat = 0.1
@@ -91,17 +108,74 @@ private func decodeSize(_ raw: CFTypeRef?) -> CGSize? {
 
 private func focusedWindowElement() -> AXUIElement? {
   let systemWide = AXUIElementCreateSystemWide()
-  guard let appRaw = copyAttribute(systemWide, kAXFocusedApplicationAttribute as CFString) else {
+  guard let appRaw = copyAttribute(systemWide, kAXFocusedApplicationAttribute as CFString),
+        CFGetTypeID(appRaw) == AXUIElementGetTypeID() else {
     return nil
   }
-  guard CFGetTypeID(appRaw) == AXUIElementGetTypeID() else { return nil }
   let appElement = unsafeBitCast(appRaw, to: AXUIElement.self)
+  return focusedWindowElement(in: appElement, preferredWindowId: nil)
+}
+
+private func focusedWindowElement(in appElement: AXUIElement, preferredWindowId: Int?) -> AXUIElement? {
+  let windowNumberAttribute = "AXWindowNumber" as CFString
+  func windowNumber(_ element: AXUIElement) -> Int? {
+    guard let raw = copyAttribute(element, windowNumberAttribute) else { return nil }
+    if let number = raw as? NSNumber {
+      return number.intValue
+    }
+    return Int(String(describing: raw))
+  }
+
+  if let preferredWindowId,
+     let windowsRaw = copyAttribute(appElement, kAXWindowsAttribute as CFString),
+     let windows = windowsRaw as? [AXUIElement],
+     let exact = windows.first(where: { windowNumber($0) == preferredWindowId }) {
+    if let role = attributeString(exact, kAXRoleAttribute as CFString), role == kAXWindowRole as String {
+      return exact
+    }
+  }
+
+  if let focusedRaw = copyAttribute(appElement, kAXFocusedWindowAttribute as CFString),
+     CFGetTypeID(focusedRaw) == AXUIElementGetTypeID() {
+    let focused = unsafeBitCast(focusedRaw, to: AXUIElement.self)
+    if let role = attributeString(focused, kAXRoleAttribute as CFString), role == kAXWindowRole as String {
+      if let preferredWindowId {
+        if let focusedId = windowNumber(focused), focusedId == preferredWindowId {
+          return focused
+        }
+      } else {
+        return focused
+      }
+    }
+  }
+
+  if let preferredWindowId,
+     let windowsRaw = copyAttribute(appElement, kAXWindowsAttribute as CFString),
+     let windows = windowsRaw as? [AXUIElement],
+     let fallback = windows.first(where: { windowNumber($0) == preferredWindowId }) {
+    if let role = attributeString(fallback, kAXRoleAttribute as CFString), role == kAXWindowRole as String {
+      return fallback
+    }
+  }
+
+  if preferredWindowId != nil {
+    // Do not silently pick a different window when a specific target was requested.
+    return nil
+  }
 
   if let focusedRaw = copyAttribute(appElement, kAXFocusedWindowAttribute as CFString),
      CFGetTypeID(focusedRaw) == AXUIElementGetTypeID() {
     let focused = unsafeBitCast(focusedRaw, to: AXUIElement.self)
     if let role = attributeString(focused, kAXRoleAttribute as CFString), role == kAXWindowRole as String {
       return focused
+    }
+  }
+
+  if let mainRaw = copyAttribute(appElement, kAXMainWindowAttribute as CFString),
+     CFGetTypeID(mainRaw) == AXUIElementGetTypeID() {
+    let main = unsafeBitCast(mainRaw, to: AXUIElement.self)
+    if let role = attributeString(main, kAXRoleAttribute as CFString), role == kAXWindowRole as String {
+      return main
     }
   }
 
@@ -113,6 +187,54 @@ private func focusedWindowElement() -> AXUIElement? {
     return firstWindow
   }
 
+  return nil
+}
+
+private func runningApp(for hint: TargetHint) -> NSRunningApplication? {
+  let normalizedBundleId = hint.bundleId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+  if !normalizedBundleId.isEmpty {
+    let matches = NSRunningApplication.runningApplications(withBundleIdentifier: normalizedBundleId)
+      .filter { !$0.isTerminated }
+    if let active = matches.first(where: { $0.isActive }) {
+      return active
+    }
+    if let first = matches.first {
+      return first
+    }
+  }
+
+  let normalizedPath = hint.appPath?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+  if !normalizedPath.isEmpty {
+    let apps = NSWorkspace.shared.runningApplications.filter { app in
+      if app.isTerminated { return false }
+      if let bundlePath = app.bundleURL?.path, bundlePath == normalizedPath {
+        return true
+      }
+      if let executablePath = app.executableURL?.path, executablePath.hasPrefix(normalizedPath) {
+        return true
+      }
+      return false
+    }
+    if let active = apps.first(where: { $0.isActive }) {
+      return active
+    }
+    if let first = apps.first {
+      return first
+    }
+  }
+
+  return nil
+}
+
+private func focusedWindowElement(targetHint: TargetHint?) -> AXUIElement? {
+  if let targetHint, let app = runningApp(for: targetHint) {
+    let appElement = AXUIElementCreateApplication(app.processIdentifier)
+    if let win = focusedWindowElement(in: appElement, preferredWindowId: targetHint.windowId) {
+      return win
+    }
+  }
+
+  let systemWide = AXUIElementCreateSystemWide()
   if let focusedUiRaw = copyAttribute(systemWide, kAXFocusedUIElementAttribute as CFString),
      CFGetTypeID(focusedUiRaw) == AXUIElementGetTypeID() {
     var current = unsafeBitCast(focusedUiRaw, to: AXUIElement.self)
@@ -170,11 +292,121 @@ private func screenVisibleArea(for frame: WindowFrame) -> CGRect? {
 }
 
 private func adjustedFrame(_ base: WindowFrame, action: AdjustAction) -> WindowFrame {
+  let area = screenVisibleArea(for: base)
   let stepX = max(1, round(base.width * adjustRatio))
   let stepY = max(1, round(base.height * adjustRatio))
   var next = base
 
   switch action {
+  case .left:
+    if let area {
+      next = WindowFrame(
+        x: area.origin.x,
+        y: area.origin.y,
+        width: max(minWidth, round(area.width / 2)),
+        height: max(minHeight, round(area.height))
+      )
+    }
+  case .right:
+    if let area {
+      let width = max(minWidth, round(area.width / 2))
+      next = WindowFrame(
+        x: area.origin.x + area.width - width,
+        y: area.origin.y,
+        width: width,
+        height: max(minHeight, round(area.height))
+      )
+    }
+  case .top:
+    if let area {
+      next = WindowFrame(
+        x: area.origin.x,
+        y: area.origin.y,
+        width: max(minWidth, round(area.width)),
+        height: max(minHeight, round(area.height / 2))
+      )
+    }
+  case .bottom:
+    if let area {
+      let height = max(minHeight, round(area.height / 2))
+      next = WindowFrame(
+        x: area.origin.x,
+        y: area.origin.y + area.height - height,
+        width: max(minWidth, round(area.width)),
+        height: height
+      )
+    }
+  case .fill:
+    if let area {
+      next = WindowFrame(
+        x: area.origin.x,
+        y: area.origin.y,
+        width: max(minWidth, round(area.width)),
+        height: max(minHeight, round(area.height))
+      )
+    }
+  case .center:
+    if let area {
+      let width = max(minWidth, round(area.width * 0.6))
+      let height = max(minHeight, round(area.height * 0.6))
+      next = WindowFrame(
+        x: area.origin.x + round((area.width - width) / 2),
+        y: area.origin.y + round((area.height - height) / 2),
+        width: width,
+        height: height
+      )
+    }
+  case .center80:
+    if let area {
+      let width = max(minWidth, round(area.width * 0.8))
+      let height = max(minHeight, round(area.height * 0.8))
+      next = WindowFrame(
+        x: area.origin.x + round((area.width - width) / 2),
+        y: area.origin.y + round((area.height - height) / 2),
+        width: width,
+        height: height
+      )
+    }
+  case .topLeft:
+    if let area {
+      next = WindowFrame(
+        x: area.origin.x,
+        y: area.origin.y,
+        width: max(minWidth, round(area.width / 2)),
+        height: max(minHeight, round(area.height / 2))
+      )
+    }
+  case .topRight:
+    if let area {
+      let width = max(minWidth, round(area.width / 2))
+      next = WindowFrame(
+        x: area.origin.x + area.width - width,
+        y: area.origin.y,
+        width: width,
+        height: max(minHeight, round(area.height / 2))
+      )
+    }
+  case .bottomLeft:
+    if let area {
+      let height = max(minHeight, round(area.height / 2))
+      next = WindowFrame(
+        x: area.origin.x,
+        y: area.origin.y + area.height - height,
+        width: max(minWidth, round(area.width / 2)),
+        height: height
+      )
+    }
+  case .bottomRight:
+    if let area {
+      let width = max(minWidth, round(area.width / 2))
+      let height = max(minHeight, round(area.height / 2))
+      next = WindowFrame(
+        x: area.origin.x + area.width - width,
+        y: area.origin.y + area.height - height,
+        width: width,
+        height: height
+      )
+    }
   case .increaseSize10:
     next = WindowFrame(
       x: base.x - round(stepX / 2),
@@ -263,7 +495,7 @@ private func adjustedFrame(_ base: WindowFrame, action: AdjustAction) -> WindowF
     next = WindowFrame(x: base.x + stepX, y: base.y, width: base.width, height: base.height)
   }
 
-  if let area = screenVisibleArea(for: base) {
+  if let area {
     next.width = clamp(round(next.width), minWidth, max(minWidth, area.width))
     next.height = clamp(round(next.height), minHeight, max(minHeight, area.height))
     next.x = clamp(round(next.x), area.origin.x, area.origin.x + area.width - next.width)
@@ -279,10 +511,36 @@ private func adjustedFrame(_ base: WindowFrame, action: AdjustAction) -> WindowF
 }
 
 private func run() {
-  guard let rawAction = CommandLine.arguments.dropFirst().first,
+  let args = Array(CommandLine.arguments.dropFirst())
+  guard let rawAction = args.first,
         let action = AdjustAction(rawValue: rawAction) else {
     emit(ok: false, error: "invalid_action")
     return
+  }
+
+  var targetHint = TargetHint(bundleId: nil, appPath: nil, windowId: nil)
+  var index = 1
+  while index < args.count {
+    let key = args[index]
+    if key == "--bundle-id", index + 1 < args.count {
+      let value = args[index + 1].trimmingCharacters(in: .whitespacesAndNewlines)
+      targetHint.bundleId = value.isEmpty ? nil : value
+      index += 2
+      continue
+    }
+    if key == "--app-path", index + 1 < args.count {
+      let value = args[index + 1].trimmingCharacters(in: .whitespacesAndNewlines)
+      targetHint.appPath = value.isEmpty ? nil : value
+      index += 2
+      continue
+    }
+    if key == "--window-id", index + 1 < args.count {
+      let value = args[index + 1].trimmingCharacters(in: .whitespacesAndNewlines)
+      targetHint.windowId = Int(value)
+      index += 2
+      continue
+    }
+    index += 1
   }
 
   guard AXIsProcessTrusted() else {
@@ -290,7 +548,7 @@ private func run() {
     return
   }
 
-  guard let window = focusedWindowElement() else {
+  guard let window = focusedWindowElement(targetHint: targetHint) else {
     emit(ok: false, error: "no_focused_window")
     return
   }

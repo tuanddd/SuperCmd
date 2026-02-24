@@ -105,6 +105,8 @@ let hasLoggedLiquidGlassRuntimeIncompatibility = false;
 let windowManagerAccessRequested = false;
 let windowManagementTargetWindowId: string | null = null;
 let windowManagementTargetWorkArea: { x: number; y: number; width: number; height: number } | null = null;
+let launcherEntryWindowManagementTargetWindowId: string | null = null;
+let launcherEntryWindowManagementTargetWorkArea: { x: number; y: number; width: number; height: number } | null = null;
 const WINDOW_MANAGEMENT_MUTATION_MIN_INTERVAL_MS = 6;
 let windowManagementMutationQueue: Promise<void> = Promise.resolve();
 let lastWindowManagementMutationAt = 0;
@@ -1081,7 +1083,9 @@ function scheduleNextAppUpdaterAutoCheck(lastCheckedAtMs: number): void {
     void runBackgroundAppUpdaterCheck();
   }, delayMs);
 }
-let lastFrontmostApp: { name: string; path: string; bundleId?: string } | null = null;
+type FrontmostAppContext = { name: string; path: string; bundleId?: string };
+let lastFrontmostApp: FrontmostAppContext | null = null;
+let launcherEntryFrontmostApp: FrontmostAppContext | null = null;
 const registeredHotkeys = new Map<string, string>(); // shortcut → commandId
 const activeAIRequests = new Map<string, AbortController>(); // requestId → controller
 const pendingOAuthCallbackUrls: string[] = [];
@@ -1255,6 +1259,19 @@ const WINDOW_MANAGEMENT_FINE_TUNE_COMMAND_IDS = new Set<string>([
   'system-window-management-move-left-10',
   'system-window-management-move-right-10',
 ]);
+const WINDOW_MANAGEMENT_LAYOUT_COMMAND_IDS = new Set<string>([
+  'system-window-management-left',
+  'system-window-management-right',
+  'system-window-management-top',
+  'system-window-management-bottom',
+  'system-window-management-center',
+  'system-window-management-center-80',
+  'system-window-management-fill',
+  'system-window-management-top-left',
+  'system-window-management-top-right',
+  'system-window-management-bottom-left',
+  'system-window-management-bottom-right',
+]);
 const WINDOW_MANAGEMENT_FINE_TUNE_RATIO = 0.1;
 const WINDOW_MANAGEMENT_FINE_TUNE_MIN_WIDTH = 120;
 const WINDOW_MANAGEMENT_FINE_TUNE_MIN_HEIGHT = 60;
@@ -1277,6 +1294,11 @@ function isWindowManagementSystemCommand(commandId: string): boolean {
 function isWindowManagementFineTuneCommand(commandId: string): boolean {
   const normalized = String(commandId || '').trim();
   return WINDOW_MANAGEMENT_FINE_TUNE_COMMAND_IDS.has(normalized);
+}
+
+function isWindowManagementLayoutCommand(commandId: string): boolean {
+  const normalized = String(commandId || '').trim();
+  return WINDOW_MANAGEMENT_LAYOUT_COMMAND_IDS.has(normalized);
 }
 
 function clampWindowManagementFineTuneValue(value: number, min: number, max: number): number {
@@ -1312,10 +1334,21 @@ function getNativeWindowFineTuneAction(commandId: string): string | null {
   return action;
 }
 
-async function executeNativeWindowFineTune(commandId: string): Promise<boolean | null> {
+function getNativeWindowLayoutAction(commandId: string): string | null {
+  const normalized = String(commandId || '').trim();
+  if (!normalized.startsWith(WINDOW_MANAGEMENT_FINE_TUNE_COMMAND_PREFIX)) return null;
+  if (!WINDOW_MANAGEMENT_LAYOUT_COMMAND_IDS.has(normalized)) return null;
+  const action = normalized.slice(WINDOW_MANAGEMENT_FINE_TUNE_COMMAND_PREFIX.length);
+  return action || null;
+}
+
+async function executeNativeWindowAdjustByAction(
+  action: string,
+  targetHint?: { bundleId?: string; appPath?: string; windowId?: string }
+): Promise<boolean | null> {
   if (process.platform !== 'darwin') return null;
-  const action = getNativeWindowFineTuneAction(commandId);
-  if (!action) return null;
+  const normalizedAction = String(action || '').trim();
+  if (!normalizedAction) return null;
   if (nativeWindowFineTuneSupport === false) return null;
 
   const fsNative = require('fs');
@@ -1327,10 +1360,23 @@ async function executeNativeWindowFineTune(commandId: string): Promise<boolean |
 
   try {
     const { execFile } = require('child_process');
+    const args = [normalizedAction];
+    const hintedBundleId = String(targetHint?.bundleId || '').trim();
+    const hintedAppPath = String(targetHint?.appPath || '').trim();
+    const hintedWindowId = Math.trunc(Number(targetHint?.windowId));
+    if (hintedBundleId && hintedBundleId !== 'com.supercmd.app' && hintedBundleId !== 'com.supercmd') {
+      args.push('--bundle-id', hintedBundleId);
+    }
+    if (hintedAppPath && !hintedAppPath.includes('/SuperCmd.app')) {
+      args.push('--app-path', hintedAppPath);
+    }
+    if (Number.isFinite(hintedWindowId) && hintedWindowId > 0) {
+      args.push('--window-id', String(hintedWindowId));
+    }
     const parsed = await new Promise<{ ok: boolean; error?: string } | null>((resolve) => {
       execFile(
         helperPath,
-        [action],
+        args,
         { encoding: 'utf-8', timeout: 420 },
         (error: Error | null, stdout: string, _stderr: string) => {
           const raw = String(stdout || '').trim();
@@ -1367,6 +1413,24 @@ async function executeNativeWindowFineTune(commandId: string): Promise<boolean |
     }
     return null;
   }
+}
+
+async function executeNativeWindowFineTune(
+  commandId: string,
+  targetHint?: { bundleId?: string; appPath?: string; windowId?: string }
+): Promise<boolean | null> {
+  const action = getNativeWindowFineTuneAction(commandId);
+  if (!action) return null;
+  return await executeNativeWindowAdjustByAction(action, targetHint);
+}
+
+async function executeNativeWindowLayout(
+  commandId: string,
+  targetHint?: { bundleId?: string; appPath?: string; windowId?: string }
+): Promise<boolean | null> {
+  const action = getNativeWindowLayoutAction(commandId);
+  if (!action) return null;
+  return await executeNativeWindowAdjustByAction(action, targetHint);
 }
 
 function computeWindowManagementFineTuneBounds(
@@ -1516,13 +1580,13 @@ function scheduleWindowManagementFocusRestore(): void {
 
 async function executeWindowManagementFineTuneCommand(
   commandId: string,
-  options?: { preferNative?: boolean }
+  options?: { preferNative?: boolean; nativeTargetHint?: { bundleId?: string; appPath?: string; windowId?: string } }
 ): Promise<boolean> {
   const normalized = String(commandId || '').trim();
   if (!WINDOW_MANAGEMENT_FINE_TUNE_COMMAND_IDS.has(normalized)) return false;
 
   if (options?.preferNative) {
-    const nativeResult = await executeNativeWindowFineTune(normalized);
+    const nativeResult = await executeNativeWindowFineTune(normalized, options.nativeTargetHint);
     if (nativeResult === true) return true;
   }
 
@@ -1583,6 +1647,17 @@ async function executeWindowManagementFineTuneCommand(
     console.error('Failed to execute fine-tune window command:', error);
     return false;
   }
+}
+
+async function executeWindowManagementLayoutCommand(
+  commandId: string,
+  options?: { preferNative?: boolean; nativeTargetHint?: { bundleId?: string; appPath?: string; windowId?: string } }
+): Promise<boolean> {
+  const normalized = String(commandId || '').trim();
+  if (!WINDOW_MANAGEMENT_LAYOUT_COMMAND_IDS.has(normalized)) return false;
+  if (!options?.preferNative) return false;
+  const nativeResult = await executeNativeWindowLayout(normalized, options.nativeTargetHint);
+  return nativeResult === true;
 }
 
 function enqueueWindowManagementMutation<T>(task: () => Promise<T> | T): Promise<T> {
@@ -4630,6 +4705,44 @@ function setLauncherMode(mode: LauncherMode): void {
   }
 }
 
+function cloneFrontmostAppContext(value: FrontmostAppContext | null | undefined): FrontmostAppContext | null {
+  if (!value) return null;
+  const name = String(value.name || '').trim();
+  const pathValue = String(value.path || '').trim();
+  const bundleId = String(value.bundleId || '').trim();
+  if (!name && !pathValue && !bundleId) return null;
+  return {
+    name: name || (bundleId ? bundleId : 'Unknown'),
+    path: pathValue,
+    ...(bundleId ? { bundleId } : {}),
+  };
+}
+
+function resolveLauncherEntryFrontmostApp(): FrontmostAppContext | null {
+  const captured = cloneFrontmostAppContext(launcherEntryFrontmostApp);
+  if (captured) return captured;
+  return cloneFrontmostAppContext(lastFrontmostApp);
+}
+
+function cloneWorkArea(
+  value: { x: number; y: number; width: number; height: number } | null | undefined
+): { x: number; y: number; width: number; height: number } | null {
+  if (!value) return null;
+  return {
+    x: Math.round(Number(value.x) || 0),
+    y: Math.round(Number(value.y) || 0),
+    width: Math.max(1, Math.round(Number(value.width) || 1)),
+    height: Math.max(1, Math.round(Number(value.height) || 1)),
+  };
+}
+
+function resolveLauncherEntryTargetWindowId(): string | null {
+  const normalized = String(launcherEntryWindowManagementTargetWindowId || '').trim();
+  if (normalized) return normalized;
+  const fallback = String(windowManagementTargetWindowId || '').trim();
+  return fallback || null;
+}
+
 function captureFrontmostAppContext(): void {
   if (process.platform !== 'darwin') return;
   try {
@@ -4693,9 +4806,17 @@ async function showWindow(options?: { systemCommandId?: string }): Promise<void>
   // Skip during onboarding to avoid any focus-stealing side effects during setup.
   if (launcherMode !== 'onboarding') {
     captureFrontmostAppContext();
+    launcherEntryFrontmostApp = cloneFrontmostAppContext(lastFrontmostApp);
+    await captureWindowManagementTargetWindow();
+    launcherEntryWindowManagementTargetWindowId = String(windowManagementTargetWindowId || '').trim() || null;
+    launcherEntryWindowManagementTargetWorkArea = cloneWorkArea(windowManagementTargetWorkArea);
     // Keep launcher open path fast: avoid clipboard fallback (synthetic Cmd+C)
     // on window open because it can interfere with immediate typing.
     selectionSnapshotPromise = captureSelectionSnapshotBeforeShow({ allowClipboardFallback: false });
+  } else {
+    launcherEntryFrontmostApp = null;
+    launcherEntryWindowManagementTargetWindowId = null;
+    launcherEntryWindowManagementTargetWorkArea = null;
   }
 
   applyLauncherBounds(launcherMode);
@@ -4773,6 +4894,9 @@ function hideWindow(): void {
   emitWindowHidden();
   mainWindow.hide();
   isVisible = false;
+  launcherEntryFrontmostApp = null;
+  launcherEntryWindowManagementTargetWindowId = null;
+  launcherEntryWindowManagementTargetWorkArea = null;
   unregisterWhisperEscapeShortcut();
   try {
     mainWindow.setFocusable(true);
@@ -5502,13 +5626,81 @@ async function runCommandById(commandId: string, source: 'launcher' | 'hotkey' =
       mode: launcherMode === 'onboarding' ? 'onboarding' : 'default',
     });
   }
+  if (isWindowManagementLayoutCommand(commandId)) {
+    const shouldPreserveFocusWhenHidden = source === 'launcher' || isVisible;
+    const shouldCaptureTargetHint = source === 'hotkey' || !isVisible;
+    if (shouldCaptureTargetHint) {
+      captureFrontmostAppContext();
+      await captureWindowManagementTargetWindow();
+    }
+    const preferredFrontmostApp = source === 'launcher' && isVisible
+      ? resolveLauncherEntryFrontmostApp()
+      : cloneFrontmostAppContext(lastFrontmostApp);
+    const preferredTargetWindowId = source === 'launcher' && isVisible
+      ? resolveLauncherEntryTargetWindowId()
+      : (String(windowManagementTargetWindowId || '').trim() || null);
+    if (source === 'launcher' && isVisible) {
+      windowManagementTargetWindowId = preferredTargetWindowId;
+      windowManagementTargetWorkArea = cloneWorkArea(launcherEntryWindowManagementTargetWorkArea);
+    }
+    if (preferredFrontmostApp) {
+      lastFrontmostApp = preferredFrontmostApp;
+    }
+    const nativeTargetHint = preferredFrontmostApp
+      ? {
+          bundleId: String(preferredFrontmostApp.bundleId || '').trim(),
+          appPath: String(preferredFrontmostApp.path || '').trim(),
+          windowId: String(preferredTargetWindowId || '').trim(),
+        }
+      : undefined;
+    const success = await executeWindowManagementLayoutCommand(commandId, {
+      preferNative: true,
+      nativeTargetHint,
+    });
+    if (success && source === 'launcher') {
+      setTimeout(() => hideWindow(), 25);
+    }
+    if (success && shouldPreserveFocusWhenHidden) {
+      scheduleWindowManagementFocusRestore();
+    }
+    if (success) return true;
+    return await openLauncherAndRunSystemCommand(commandId, {
+      showWindow: false,
+      mode: launcherMode === 'onboarding' ? 'onboarding' : 'default',
+      preserveFocusWhenHidden: true,
+    });
+  }
   if (isWindowManagementFineTuneCommand(commandId)) {
     const shouldPreserveFocusWhenHidden = source === 'launcher' || isVisible;
-    if (shouldPreserveFocusWhenHidden) {
+    const shouldCaptureTargetHint = source === 'hotkey' || !isVisible;
+    if (shouldCaptureTargetHint) {
       captureFrontmostAppContext();
+      await captureWindowManagementTargetWindow();
     }
+    const preferredFrontmostApp = source === 'launcher' && isVisible
+      ? resolveLauncherEntryFrontmostApp()
+      : cloneFrontmostAppContext(lastFrontmostApp);
+    const preferredTargetWindowId = source === 'launcher' && isVisible
+      ? resolveLauncherEntryTargetWindowId()
+      : (String(windowManagementTargetWindowId || '').trim() || null);
+    if (source === 'launcher' && isVisible) {
+      windowManagementTargetWindowId = preferredTargetWindowId;
+      windowManagementTargetWorkArea = cloneWorkArea(launcherEntryWindowManagementTargetWorkArea);
+    }
+    if (preferredFrontmostApp) {
+      lastFrontmostApp = preferredFrontmostApp;
+    }
+    const nativeTargetHint = preferredFrontmostApp
+      ? {
+          bundleId: String(preferredFrontmostApp.bundleId || '').trim(),
+          appPath: String(preferredFrontmostApp.path || '').trim(),
+          windowId: String(preferredTargetWindowId || '').trim(),
+        }
+      : undefined;
+    const hasNativeTargetHint = Boolean(preferredFrontmostApp);
     const success = await executeWindowManagementFineTuneCommand(commandId, {
-      preferNative: source === 'hotkey' && !isVisible,
+      preferNative: !isVisible || hasNativeTargetHint,
+      nativeTargetHint,
     });
     if (success && source === 'launcher') {
       setTimeout(() => hideWindow(), 25);
