@@ -203,19 +203,22 @@ function addTextItem(text: string): void {
   saveHistory();
 }
 
-function addImageItem(image: ReturnType<typeof nativeImage.createFromDataURL>): void {
+function addImageItem(image: ReturnType<typeof nativeImage.createFromDataURL>, rawGifData?: Buffer): void {
   try {
     const size = image.getSize();
     if (size.width === 0 || size.height === 0) return;
-    
-    const png = image.toPNG();
-    if (png.length === 0 || png.length > MAX_IMAGE_SIZE) return;
-    
+
+    const isGif = !!rawGifData;
+    const dataToSave = rawGifData || image.toPNG();
+    if (dataToSave.length === 0 || dataToSave.length > MAX_IMAGE_SIZE) return;
+
+    const ext = isGif ? 'gif' : 'png';
+
     // Save image to disk
     const imageId = crypto.randomUUID();
-    const imagePath = path.join(getImagesDir(), `${imageId}.png`);
-    fs.writeFileSync(imagePath, png);
-    
+    const imagePath = path.join(getImagesDir(), `${imageId}.${ext}`);
+    fs.writeFileSync(imagePath, dataToSave);
+
     const item: ClipboardItem = {
       id: imageId,
       type: 'image',
@@ -224,11 +227,11 @@ function addImageItem(image: ReturnType<typeof nativeImage.createFromDataURL>): 
       metadata: {
         width: size.width,
         height: size.height,
-        size: png.length,
-        format: 'png',
+        size: dataToSave.length,
+        format: ext,
       },
     };
-    
+
     clipboardHistory.unshift(item);
     if (clipboardHistory.length > MAX_ITEMS) {
       const removed = clipboardHistory.pop();
@@ -239,7 +242,7 @@ function addImageItem(image: ReturnType<typeof nativeImage.createFromDataURL>): 
         } catch {}
       }
     }
-    
+
     saveHistory();
   } catch (e) {
     console.error('Failed to save clipboard image:', e);
@@ -248,21 +251,33 @@ function addImageItem(image: ReturnType<typeof nativeImage.createFromDataURL>): 
 
 function pollClipboard(): void {
   if (!isEnabled) return;
-  
+
   try {
-    // Check for images first (higher priority)
+    // Check for GIF data first (clipboard.readImage loses animation)
+    let rawGifData: Buffer | undefined;
+    try {
+      const gifBuf = clipboard.readBuffer('com.compuserve.gif');
+      if (gifBuf && gifBuf.length > 4) {
+        // Verify GIF magic bytes (GIF87a or GIF89a)
+        if (gifBuf[0] === 0x47 && gifBuf[1] === 0x49 && gifBuf[2] === 0x46) {
+          rawGifData = gifBuf;
+        }
+      }
+    } catch {}
+
+    // Check for images (higher priority than text)
     const image = clipboard.readImage();
     if (!image.isEmpty()) {
-      const png = image.toPNG();
-      const hash = hashBuffer(png);
-      
+      const hashSource = rawGifData || image.toPNG();
+      const hash = hashBuffer(hashSource);
+
       if (!lastClipboardImage || hashBuffer(lastClipboardImage) !== hash) {
-        lastClipboardImage = png;
-        addImageItem(image);
+        lastClipboardImage = hashSource;
+        addImageItem(image, rawGifData);
         return;
       }
     }
-    
+
     // Check for text
     const text = clipboard.readText();
     if (text && text !== lastClipboardText) {
@@ -348,14 +363,27 @@ export function deleteClipboardItem(id: string): boolean {
 export function copyItemToClipboard(id: string): boolean {
   const item = clipboardHistory.find((i) => i.id === id);
   if (!item) return false;
-  
+
   try {
     // Temporarily disable monitoring to avoid re-adding this item
     isEnabled = false;
-    
+
     if (item.type === 'image') {
-      const image = nativeImage.createFromPath(item.content);
-      clipboard.writeImage(image);
+      const ext = path.extname(item.content).toLowerCase();
+      if (ext === '.gif' && fs.existsSync(item.content)) {
+        // Write raw GIF data so pasting preserves animation
+        const gifData = fs.readFileSync(item.content);
+        clipboard.clear();
+        clipboard.writeBuffer('com.compuserve.gif', gifData);
+        // Also write a static fallback for apps that don't support GIF
+        const fallback = nativeImage.createFromPath(item.content);
+        if (!fallback.isEmpty()) {
+          clipboard.writeBuffer('public.tiff', fallback.toPNG());
+        }
+      } else {
+        const image = nativeImage.createFromPath(item.content);
+        clipboard.writeImage(image);
+      }
     } else {
       clipboard.writeText(item.content);
     }

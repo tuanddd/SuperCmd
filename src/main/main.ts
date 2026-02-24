@@ -8566,7 +8566,41 @@ return appURL's |path|() as text`,
         normalizedFile = path.resolve(normalizedFile);
 
         if (fs.existsSync(normalizedFile)) {
+          const ext = path.extname(normalizedFile).toLowerCase();
+          const IMAGE_EXTENSIONS: Record<string, string> = {
+            '.gif': 'com.compuserve.gif',
+            '.png': 'public.png',
+            '.jpg': 'public.jpeg',
+            '.jpeg': 'public.jpeg',
+            '.webp': 'org.webmproject.webp',
+            '.bmp': 'com.microsoft.bmp',
+            '.tiff': 'public.tiff',
+            '.tif': 'public.tiff',
+            '.heic': 'public.heic',
+          };
+          const imageUti = IMAGE_EXTENSIONS[ext];
+
+          if (imageUti && process.platform === 'darwin') {
+            // For image files, write the raw image data to the clipboard
+            // so pasting works in chat apps, editors, etc.
+            try {
+              const rawData = fs.readFileSync(normalizedFile);
+              systemClipboard.clear();
+              // Write the native format (e.g. GIF, PNG, JPEG)
+              systemClipboard.writeBuffer(imageUti, rawData);
+              // Also write a TIFF/PNG fallback for apps that don't support the native format
+              const fallbackImage = nativeImage.createFromPath(normalizedFile);
+              if (!fallbackImage.isEmpty()) {
+                systemClipboard.writeBuffer('public.tiff', fallbackImage.toJPEG(95) ? fallbackImage.toPNG() : fallbackImage.toPNG());
+              }
+              return true;
+            } catch (imgErr) {
+              console.error('clipboard-write image buffer failed, falling back:', imgErr);
+            }
+          }
+
           if (process.platform === 'darwin') {
+            // Non-image files: copy as file reference
             try {
               const { execFileSync } = require('child_process') as typeof import('child_process');
               const script = `set the clipboard to (POSIX file ${JSON.stringify(normalizedFile)})`;
