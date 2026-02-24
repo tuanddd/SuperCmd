@@ -28,7 +28,17 @@ type PresetId =
   | 'center'
   | 'center-80'
   | 'fill'
-  | 'auto-organize';
+  | 'auto-organize'
+  | 'increase-size-10'
+  | 'decrease-size-10'
+  | 'increase-left-10'
+  | 'increase-right-10'
+  | 'increase-bottom-10'
+  | 'increase-top-10'
+  | 'move-up-10'
+  | 'move-down-10'
+  | 'move-left-10'
+  | 'move-right-10';
 
 type Rect = { x: number; y: number; width: number; height: number };
 type ScreenArea = { left: number; top: number; width: number; height: number };
@@ -54,9 +64,34 @@ const PRESETS: Array<{ id: PresetId; label: string; subtitle: string }> = [
   { id: 'bottom-right', label: 'Bottom Right', subtitle: 'Current window' },
   { id: 'bottom-left', label: 'Bottom Left', subtitle: 'Current window' },
   { id: 'auto-organize', label: 'Auto organise', subtitle: 'All windows on this screen' },
+  { id: 'increase-size-10', label: 'Increase size by 10%', subtitle: 'Current window' },
+  { id: 'decrease-size-10', label: 'Decrease size by 10%', subtitle: 'Current window' },
+  { id: 'increase-left-10', label: 'Increase on left by 10%', subtitle: 'Current window' },
+  { id: 'increase-right-10', label: 'Increase on right by 10%', subtitle: 'Current window' },
+  { id: 'increase-bottom-10', label: 'Increase on bottom by 10%', subtitle: 'Current window' },
+  { id: 'increase-top-10', label: 'Increase on top by 10%', subtitle: 'Current window' },
+  { id: 'move-up-10', label: 'Move up by 10%', subtitle: 'Current window' },
+  { id: 'move-down-10', label: 'Move down by 10%', subtitle: 'Current window' },
+  { id: 'move-left-10', label: 'Move left by 10%', subtitle: 'Current window' },
+  { id: 'move-right-10', label: 'Move right by 10%', subtitle: 'Current window' },
 ];
 
 const MULTI_WINDOW_PRESETS = new Set<PresetId>(['auto-organize']);
+const SHIFT_ENTER_ONLY_PRESETS = new Set<PresetId>([
+  'increase-size-10',
+  'decrease-size-10',
+  'increase-left-10',
+  'increase-right-10',
+  'increase-bottom-10',
+  'increase-top-10',
+  'move-up-10',
+  'move-down-10',
+  'move-left-10',
+  'move-right-10',
+]);
+const WINDOW_ADJUST_RATIO = 0.1;
+const MIN_WINDOW_WIDTH = 120;
+const MIN_WINDOW_HEIGHT = 60;
 
 function resolveIsDarkTheme(): boolean {
   if (typeof window === 'undefined' || typeof document === 'undefined') return true;
@@ -146,6 +181,119 @@ function renderPresetIcon(id: PresetId): JSX.Element {
 
 function normalizeText(value: unknown): string {
   return String(value || '').trim();
+}
+
+function isShiftEnterOnlyPreset(presetId: PresetId): boolean {
+  return SHIFT_ENTER_ONLY_PRESETS.has(presetId);
+}
+
+function clamp(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  if (max <= min) return min;
+  return Math.max(min, Math.min(max, value));
+}
+
+function getWindowRect(win: ManagedWindow | null | undefined): Rect | null {
+  const x = Number(win?.bounds?.position?.x);
+  const y = Number(win?.bounds?.position?.y);
+  const width = Number(win?.bounds?.size?.width);
+  const height = Number(win?.bounds?.size?.height);
+  if (![x, y, width, height].every((value) => Number.isFinite(value))) return null;
+  return {
+    x: Math.round(x),
+    y: Math.round(y),
+    width: Math.max(1, Math.round(width)),
+    height: Math.max(1, Math.round(height)),
+  };
+}
+
+function applyFineTunePreset(presetId: PresetId, target: ManagedWindow, area: ScreenArea): Rect | null {
+  if (!isShiftEnterOnlyPreset(presetId)) return null;
+  const base = getWindowRect(target);
+  if (!base) return null;
+
+  const areaRight = area.left + area.width;
+  const areaBottom = area.top + area.height;
+  const stepX = Math.max(1, Math.round(base.width * WINDOW_ADJUST_RATIO));
+  const stepY = Math.max(1, Math.round(base.height * WINDOW_ADJUST_RATIO));
+  let next: Rect = { ...base };
+
+  switch (presetId) {
+    case 'increase-size-10':
+      next = {
+        x: base.x - Math.round(stepX / 2),
+        y: base.y - Math.round(stepY / 2),
+        width: base.width + stepX,
+        height: base.height + stepY,
+      };
+      break;
+    case 'decrease-size-10':
+      next = {
+        x: base.x + Math.round(stepX / 2),
+        y: base.y + Math.round(stepY / 2),
+        width: Math.max(MIN_WINDOW_WIDTH, base.width - stepX),
+        height: Math.max(MIN_WINDOW_HEIGHT, base.height - stepY),
+      };
+      break;
+    case 'increase-left-10': {
+      const rightEdge = base.x + base.width;
+      const leftEdge = base.x - stepX;
+      next = {
+        x: leftEdge,
+        y: base.y,
+        width: rightEdge - leftEdge,
+        height: base.height,
+      };
+      break;
+    }
+    case 'increase-right-10':
+      next = {
+        x: base.x,
+        y: base.y,
+        width: base.width + stepX,
+        height: base.height,
+      };
+      break;
+    case 'increase-top-10': {
+      const bottomEdge = base.y + base.height;
+      const topEdge = base.y - stepY;
+      next = {
+        x: base.x,
+        y: topEdge,
+        width: base.width,
+        height: bottomEdge - topEdge,
+      };
+      break;
+    }
+    case 'increase-bottom-10':
+      next = {
+        x: base.x,
+        y: base.y,
+        width: base.width,
+        height: base.height + stepY,
+      };
+      break;
+    case 'move-up-10':
+      next = { ...base, y: base.y - stepY };
+      break;
+    case 'move-down-10':
+      next = { ...base, y: base.y + stepY };
+      break;
+    case 'move-left-10':
+      next = { ...base, x: base.x - stepX };
+      break;
+    case 'move-right-10':
+      next = { ...base, x: base.x + stepX };
+      break;
+    default:
+      return null;
+  }
+
+  next.width = clamp(Math.round(next.width), MIN_WINDOW_WIDTH, area.width);
+  next.height = clamp(Math.round(next.height), MIN_WINDOW_HEIGHT, area.height);
+  next.x = clamp(Math.round(next.x), area.left, areaRight - next.width);
+  next.y = clamp(Math.round(next.y), area.top, areaBottom - next.height);
+  return next;
 }
 
 function isSuperCmdWindow(win: ManagedWindow | null | undefined): boolean {
@@ -754,11 +902,34 @@ const WindowManagerPanel: React.FC<WindowManagerPanelProps> = ({ show, portalTar
           target = (await window.electron.getActiveWindow?.()) as ManagedWindow | null;
         } catch {}
       }
+      const area = normalizeScreenArea(workAreaRaw, hostArea);
+
       if (target && !isManageableWindow(target)) {
         target = null;
       }
 
-      const area = normalizeScreenArea(workAreaRaw, hostArea);
+      if (!target) {
+        try {
+          const windows = ((await window.electron.getWindowsOnActiveDesktop?.()) || []) as ManagedWindow[];
+          const candidates = windows
+            .filter(isManageableWindow)
+            .filter((win) => isWindowOnScreenArea(win, area));
+          if (candidates.length > 0) {
+            const areaCenter = {
+              x: area.left + area.width / 2,
+              y: area.top + area.height / 2,
+            };
+            target = [...candidates].sort((a, b) => {
+              const ac = getWindowCenter(a);
+              const bc = getWindowCenter(b);
+              const ad = Math.hypot(ac.x - areaCenter.x, ac.y - areaCenter.y);
+              const bd = Math.hypot(bc.x - areaCenter.x, bc.y - areaCenter.y);
+              return ad - bd;
+            })[0] || null;
+          }
+        } catch {}
+      }
+
       layoutAreaRef.current = area;
       lastContextAtRef.current = Date.now();
       targetWindowRef.current = target;
@@ -838,12 +1009,17 @@ const WindowManagerPanel: React.FC<WindowManagerPanelProps> = ({ show, portalTar
 
   const applyPresetNow = useCallback(async (presetId: PresetId, options?: { force?: boolean }) => {
     const isMultiWindow = MULTI_WINDOW_PRESETS.has(presetId);
+    const requiresShiftEnter = isShiftEnterOnlyPreset(presetId);
     const context = await loadContext(options?.force);
     const layoutArea = context?.area ?? hostArea;
     const windows = isMultiWindow ? await loadWindowsForLayout(options?.force) : [];
-    const target = isMultiWindow ? null : context?.target ?? null;
+    const target = context?.target ?? null;
     const layoutWindows = isMultiWindow ? windows : (target ? [target] : []);
-    if (!layoutWindows || layoutWindows.length === 0) {
+    if (requiresShiftEnter && !target) {
+      setStatusText('No target window found.');
+      return;
+    }
+    if (!requiresShiftEnter && (!layoutWindows || layoutWindows.length === 0)) {
       setStatusText(isMultiWindow ? 'No movable windows found on this screen.' : 'No target window found.');
       return;
     }
@@ -856,7 +1032,13 @@ const WindowManagerPanel: React.FC<WindowManagerPanelProps> = ({ show, portalTar
     lastPreviewKeyRef.current = previewKey;
     let moves: LayoutMove[] = [];
     let movedCount = layoutTargets.length;
-    if (isMultiWindow) {
+    if (requiresShiftEnter && target) {
+      const adjusted = applyFineTunePreset(presetId, target, layoutArea);
+      if (adjusted) {
+        moves = [{ id: target.id, bounds: rectToBounds(adjusted) }];
+        movedCount = 1;
+      }
+    } else if (isMultiWindow) {
       if (presetId === 'auto-organize') {
         moves = buildAutoOrganizeLayout(layoutTargets, layoutArea);
         movedCount = Math.min(layoutTargets.length, 4);
@@ -954,7 +1136,7 @@ const WindowManagerPanel: React.FC<WindowManagerPanelProps> = ({ show, portalTar
         const nextIndex = selectedIndex < 0 ? 0 : (selectedIndex + 1) % filteredPresets.length;
         setSelectedIndex(nextIndex);
         const preset = filteredPresets[nextIndex];
-        if (preset) queuePreview(preset.id);
+        if (preset && !isShiftEnterOnlyPreset(preset.id)) queuePreview(preset.id);
         return;
       }
       if (event.key === 'ArrowUp') {
@@ -963,7 +1145,7 @@ const WindowManagerPanel: React.FC<WindowManagerPanelProps> = ({ show, portalTar
         const nextIndex = selectedIndex < 0 ? filteredPresets.length - 1 : (selectedIndex - 1 + filteredPresets.length) % filteredPresets.length;
         setSelectedIndex(nextIndex);
         const preset = filteredPresets[nextIndex];
-        if (preset) queuePreview(preset.id);
+        if (preset && !isShiftEnterOnlyPreset(preset.id)) queuePreview(preset.id);
         return;
       }
       if (event.key === 'Enter') {
@@ -971,9 +1153,20 @@ const WindowManagerPanel: React.FC<WindowManagerPanelProps> = ({ show, portalTar
         if (selectedIndex < 0) return;
         const preset = filteredPresets[selectedIndex];
         if (!preset) return;
+        const requiresShiftEnter = isShiftEnterOnlyPreset(preset.id);
+        if (requiresShiftEnter && !event.shiftKey) {
+          // These commands mutate the current window incrementally. Require
+          // Shift+Enter so arrow-key selection/search never triggers them by accident.
+          setStatusText('Use Shift+Enter for this preset.');
+          return;
+        }
         void (async () => {
           await applyPresetNow(preset.id, { force: true });
-          onClose();
+          // Keep the panel open for fine-tune presets so users can apply
+          // multiple incremental adjustments quickly.
+          if (!(requiresShiftEnter && event.shiftKey)) {
+            onClose();
+          }
         })();
       }
     };
@@ -1263,6 +1456,7 @@ const WindowManagerPanel: React.FC<WindowManagerPanelProps> = ({ show, portalTar
               ) : filteredPresets.map((preset, index) => {
                 const isSelected = index === selectedIndex;
                 const isApplied = appliedPreset === preset.id;
+                const requiresShiftEnter = isShiftEnterOnlyPreset(preset.id);
                 const iconColor = isSelected ? colors.iconSelected : colors.iconDefault;
                 return (
                   <div
@@ -1281,6 +1475,10 @@ const WindowManagerPanel: React.FC<WindowManagerPanelProps> = ({ show, portalTar
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => {
                       setSelectedIndex(index);
+                      if (requiresShiftEnter) {
+                        setStatusText('Use Shift+Enter for this preset.');
+                        return;
+                      }
                       void (async () => {
                         await applyPresetNow(preset.id, { force: true });
                         onClose();
@@ -1308,15 +1506,36 @@ const WindowManagerPanel: React.FC<WindowManagerPanelProps> = ({ show, portalTar
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontSize: 12, fontWeight: 600, color: colors.rowText }}>{preset.label}</div>
                     </div>
-                    <div
-                      style={{
-                        fontSize: 9.5,
-                        color: isApplied ? colors.liveOn : colors.liveOff,
-                        letterSpacing: 0.25,
-                        textTransform: 'uppercase',
-                      }}
-                    >
-                      {isApplied ? 'live' : ''}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
+                      {requiresShiftEnter ? (
+                        <span
+                          title="Run with Shift+Enter"
+                          style={{
+                            fontSize: 9.5,
+                            color: colors.liveOff,
+                            letterSpacing: 0.2,
+                            padding: '2px 6px',
+                            borderRadius: 999,
+                            border: colors.controlBorder,
+                            background: colors.controlBg,
+                            boxShadow: colors.controlShadow,
+                          }}
+                        >
+                          ⇧ + ↩
+                        </span>
+                      ) : null}
+                      <div
+                        style={{
+                          fontSize: 9.5,
+                          color: isApplied ? colors.liveOn : colors.liveOff,
+                          letterSpacing: 0.25,
+                          textTransform: 'uppercase',
+                          minWidth: 24,
+                          textAlign: 'right',
+                        }}
+                      >
+                        {isApplied ? 'live' : ''}
+                      </div>
                     </div>
                   </div>
                 );
@@ -1338,7 +1557,7 @@ const WindowManagerPanel: React.FC<WindowManagerPanelProps> = ({ show, portalTar
               }}
               >
                 <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{windowsOnScreen.length} windows</span>
-                <span style={{ color: colors.footerMuted, flexShrink: 0 }}>Scroll · ↑↓ · Enter</span>
+                <span style={{ color: colors.footerMuted, flexShrink: 0 }}>Scroll · ↑↓ · Enter · Shift+Enter</span>
               </div>
           </div>
         </div>
