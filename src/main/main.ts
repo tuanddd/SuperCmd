@@ -8859,11 +8859,21 @@ if let tiff = image?.tiffRepresentation {
   });
 
   // Paste a file (image/GIF) into the previously focused app.
-  // Writes file data to clipboard, hides SuperCmd, and simulates Cmd+V.
+  // Writes file data to clipboard, hides SuperCmd, and simulates Cmd+V,
+  // then restores the previous clipboard contents.
   ipcMain.handle('paste-file', async (_event: any, filePath: string) => {
     const fs = require('fs') as typeof import('fs');
     const normalizedFile = path.resolve(String(filePath || ''));
     if (!normalizedFile || !fs.existsSync(normalizedFile)) return false;
+
+    // Save previous clipboard state to restore after pasting
+    const previousText = systemClipboard.readText();
+    const previousImage = systemClipboard.readImage();
+    const hadImage = !previousImage.isEmpty();
+
+    // Pause clipboard monitor so the temporary clipboard writes
+    // (file data → paste → restore) don't create duplicate history entries.
+    setClipboardMonitorEnabled(false);
 
     try {
       const ext = path.extname(normalizedFile).toLowerCase();
@@ -8887,15 +8897,30 @@ if let tiff = image?.tiffRepresentation {
           systemClipboard.writeBuffer('public.png', fallbackImage.toPNG());
         }
       } else {
-        // Non-image file: copy as file reference
         const { execFileSync } = require('child_process') as typeof import('child_process');
         const script = `set the clipboard to (POSIX file ${JSON.stringify(normalizedFile)})`;
         execFileSync('osascript', ['-e', script], { stdio: 'ignore' });
       }
 
-      return await hideAndPaste();
+      const pasted = await hideAndPaste();
+
+      // Restore previous clipboard after a short delay, then re-enable monitor
+      setTimeout(() => {
+        try {
+          if (hadImage) {
+            systemClipboard.writeImage(previousImage);
+          } else {
+            systemClipboard.writeText(previousText);
+          }
+        } catch {}
+        // Re-enable after another short delay so the restore isn't picked up
+        setTimeout(() => setClipboardMonitorEnabled(true), 500);
+      }, 500);
+
+      return pasted;
     } catch (error) {
       console.error('paste-file failed:', error);
+      setClipboardMonitorEnabled(true);
       return false;
     }
   });
