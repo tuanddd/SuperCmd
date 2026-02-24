@@ -4860,7 +4860,10 @@ async function runCommandById(commandId: string, source: 'launcher' | 'hotkey' =
     return await openLauncherAndRunSystemCommand(commandId, {
       showWindow: false,
       mode: launcherMode === 'onboarding' ? 'onboarding' : 'default',
-      preserveFocusWhenHidden: launcherMode !== 'onboarding',
+      // Keep focus in SuperCmd for this command: detached window manager closes
+      // itself on blur, so restoring the previous app focus would immediately
+      // dismiss it after opening from hotkey.
+      preserveFocusWhenHidden: false,
     });
   }
   if (commandId === 'system-import-snippets') {

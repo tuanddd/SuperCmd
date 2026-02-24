@@ -1104,9 +1104,14 @@ const App: React.FC = () => {
       openWindowManager();
       setSearchQuery('');
       setSelectedIndex(0);
-      try {
-        await window.electron.hideWindow();
-      } catch {}
+      // Only hide when launcher is the actively focused window (launcher-invoked flow).
+      // For global-hotkey/background invocation, forcing hide can cause focus churn
+      // that immediately blurs and closes the detached window manager panel.
+      if (document.hasFocus()) {
+        try {
+          await window.electron.hideWindow();
+        } catch {}
+      }
       return true;
     }
     if (commandId === 'system-add-to-memory') {
