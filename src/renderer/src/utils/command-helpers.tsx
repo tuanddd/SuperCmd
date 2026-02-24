@@ -13,9 +13,10 @@
  */
 
 import React from 'react';
-import { Search, Power, Settings, Puzzle, Sparkles, Clipboard, FileText, Mic, Volume2, Brain, TerminalSquare } from 'lucide-react';
+import { Search, Power, Settings, Puzzle, Sparkles, Clipboard, FileText, Mic, Volume2, Brain, TerminalSquare, RefreshCw } from 'lucide-react';
 import type { CommandInfo, EdgeTtsVoice } from '../../types/electron';
 import supercmdLogo from '../../../../supercmd.svg';
+import { formatShortcutForDisplay } from './hyper-key';
 
 export interface LauncherAction {
   id: string;
@@ -131,13 +132,7 @@ export function getCommandAccessoryLabel(command: CommandInfo): string {
 }
 
 export function formatShortcutLabel(shortcut: string): string {
-  return String(shortcut || '')
-    .replace(/Command/g, '\u2318')
-    .replace(/Control/g, '\u2303')
-    .replace(/Alt/g, '\u2325')
-    .replace(/Shift/g, '\u21E7')
-    .replace(/Period/g, '.')
-    .replace(/\+/g, ' ');
+  return formatShortcutForDisplay(shortcut).replace(/ \+ /g, ' ');
 }
 
 export function isSuperCmdAppTitle(title: string): boolean {
@@ -264,8 +259,11 @@ export function renderCommandIcon(command: CommandInfo): React.ReactNode {
     );
   }
   return (
-    <div className="w-5 h-5 rounded bg-gray-500/20 flex items-center justify-center">
-      <Settings className="w-3 h-3 text-gray-400" />
+    <div
+      className="w-5 h-5 rounded flex items-center justify-center"
+      style={{ background: 'var(--icon-neutral-bg)', color: 'var(--icon-neutral-fg)' }}
+    >
+      <Settings className="w-3 h-3" />
     </div>
   );
 }
@@ -293,8 +291,11 @@ export function getSystemCommandFallbackIcon(commandId: string): React.ReactNode
 
   if (commandId === 'system-clipboard-manager') {
     return (
-      <div className="w-5 h-5 rounded bg-cyan-500/20 flex items-center justify-center">
-        <Clipboard className="w-3 h-3 text-cyan-300" />
+      <div
+        className="w-5 h-5 rounded flex items-center justify-center"
+        style={{ background: 'var(--icon-clipboard-bg)', color: 'var(--icon-clipboard-fg)' }}
+      >
+        <Clipboard className="w-3 h-3" />
       </div>
     );
   }
@@ -306,8 +307,11 @@ export function getSystemCommandFallbackIcon(commandId: string): React.ReactNode
     commandId === 'system-export-snippets'
   ) {
     return (
-      <div className="w-5 h-5 rounded bg-amber-500/20 flex items-center justify-center">
-        <FileText className="w-3 h-3 text-amber-300" />
+      <div
+        className="w-5 h-5 rounded flex items-center justify-center"
+        style={{ background: 'var(--icon-snippet-bg)', color: 'var(--icon-snippet-fg)' }}
+      >
+        <FileText className="w-3 h-3" />
       </div>
     );
   }
@@ -317,16 +321,22 @@ export function getSystemCommandFallbackIcon(commandId: string): React.ReactNode
     commandId === 'system-open-script-commands'
   ) {
     return (
-      <div className="w-5 h-5 rounded bg-emerald-500/20 flex items-center justify-center">
-        <TerminalSquare className="w-3 h-3 text-emerald-300" />
+      <div
+        className="w-5 h-5 rounded flex items-center justify-center"
+        style={{ background: 'var(--icon-script-bg)', color: 'var(--icon-script-fg)' }}
+      >
+        <TerminalSquare className="w-3 h-3" />
       </div>
     );
   }
 
   if (commandId === 'system-search-files') {
     return (
-      <div className="w-5 h-5 rounded bg-emerald-500/20 flex items-center justify-center">
-        <Search className="w-3 h-3 text-emerald-300" />
+      <div
+        className="w-5 h-5 rounded flex items-center justify-center"
+        style={{ background: 'var(--icon-search-bg)', color: 'var(--icon-search-fg)' }}
+      >
+        <Search className="w-3 h-3" />
       </div>
     );
   }
@@ -355,6 +365,14 @@ export function getSystemCommandFallbackIcon(commandId: string): React.ReactNode
     );
   }
 
+  if (commandId === 'system-check-for-updates') {
+    return (
+      <div className="w-5 h-5 rounded bg-amber-500/20 flex items-center justify-center">
+        <RefreshCw className="w-3 h-3 text-green-300" />
+      </div>
+    );
+  }
+
   return (
     <div className="w-5 h-5 rounded bg-red-500/20 flex items-center justify-center">
       <Power className="w-3 h-3 text-red-400" />
@@ -364,16 +382,7 @@ export function getSystemCommandFallbackIcon(commandId: string): React.ReactNode
 
 export function renderShortcutLabel(shortcut?: string): string {
   if (!shortcut) return '';
-  return shortcut
-    .replace(/Command|Cmd/gi, '⌘')
-    .replace(/Control|Ctrl/gi, '⌃')
-    .replace(/Alt|Option/gi, '⌥')
-    .replace(/Shift/gi, '⇧')
-    .replace(/Function|Fn/gi, 'fn')
-    .replace(/ArrowUp/g, '↑')
-    .replace(/ArrowDown/g, '↓')
-    .replace(/Backspace|Delete/g, '⌫')
-    .replace(/\+/g, ' ');
+  return formatShortcutForDisplay(shortcut).replace(/ \+ /g, ' ');
 }
 
 export function parseIntervalToMs(interval?: string): number | null {

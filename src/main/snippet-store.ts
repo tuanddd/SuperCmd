@@ -24,6 +24,23 @@ export interface Snippet {
 }
 
 let snippetsCache: Snippet[] | null = null;
+const INVALID_SNIPPET_KEYWORD_CHARS = /["'`]/;
+
+function normalizeSnippetKeywordStored(value: unknown): string | undefined {
+  const keyword = typeof value === 'string' ? value.trim() : '';
+  if (!keyword) return undefined;
+  if (INVALID_SNIPPET_KEYWORD_CHARS.test(keyword)) return undefined;
+  return keyword;
+}
+
+function normalizeSnippetKeywordInput(value: unknown): string | undefined {
+  const keyword = typeof value === 'string' ? value.trim() : '';
+  if (!keyword) return undefined;
+  if (INVALID_SNIPPET_KEYWORD_CHARS.test(keyword)) {
+    throw new Error('Snippet keyword cannot include ", \', or ` characters.');
+  }
+  return keyword;
+}
 
 // ─── Paths ──────────────────────────────────────────────────────────
 
@@ -52,7 +69,7 @@ function loadFromDisk(): Snippet[] {
           id: String(item.id || crypto.randomUUID()),
           name: String(item.name || ''),
           content: String(item.content || ''),
-          keyword: typeof item.keyword === 'string' && item.keyword.trim() ? item.keyword.trim() : undefined,
+          keyword: normalizeSnippetKeywordStored(item.keyword),
           pinned: Boolean(item.pinned),
           createdAt: typeof item.createdAt === 'number' ? item.createdAt : Date.now(),
           updatedAt: typeof item.updatedAt === 'number' ? item.updatedAt : Date.now(),
@@ -112,12 +129,13 @@ export function getSnippetById(id: string): Snippet | null {
 
 export function createSnippet(data: { name: string; content: string; keyword?: string }): Snippet {
   if (!snippetsCache) snippetsCache = loadFromDisk();
+  const normalizedKeyword = normalizeSnippetKeywordInput(data.keyword);
 
   const snippet: Snippet = {
     id: crypto.randomUUID(),
     name: data.name,
     content: data.content,
-    keyword: data.keyword || undefined,
+    keyword: normalizedKeyword,
     pinned: false,
     createdAt: Date.now(),
     updatedAt: Date.now(),
@@ -140,7 +158,7 @@ export function updateSnippet(
   const snippet = snippetsCache[index];
   if (data.name !== undefined) snippet.name = data.name;
   if (data.content !== undefined) snippet.content = data.content;
-  if (data.keyword !== undefined) snippet.keyword = data.keyword || undefined;
+  if (data.keyword !== undefined) snippet.keyword = normalizeSnippetKeywordInput(data.keyword);
   if (data.pinned !== undefined) snippet.pinned = Boolean(data.pinned);
   snippet.updatedAt = Date.now();
 
@@ -408,7 +426,7 @@ export async function importSnippetsFromFile(parentWindow?: BrowserWindow): Prom
       snippetsToImport.push({
         name: item.name,
         content,
-        keyword: item.keyword || undefined,
+        keyword: normalizeSnippetKeywordStored(item.keyword),
         pinned: Boolean(item.pinned),
       });
     }
@@ -434,7 +452,7 @@ export async function importSnippetsFromFile(parentWindow?: BrowserWindow): Prom
         id: crypto.randomUUID(),
         name: item.name,
         content: item.content,
-        keyword: item.keyword || undefined,
+        keyword: item.keyword,
         pinned: Boolean(item.pinned),
         createdAt: Date.now(),
         updatedAt: Date.now(),

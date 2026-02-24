@@ -1,5 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowUp, Loader2, X } from 'lucide-react';
+import { applyAppFontSize, getDefaultAppFontSize } from './utils/font-size';
+import { applyBaseColor } from './utils/base-color';
+import { applyUiStyle } from './utils/ui-style';
 
 const NO_AI_MODEL_ERROR = 'No AI model available. Configure one in Settings -> AI.';
 
@@ -11,6 +14,7 @@ const PromptApp: React.FC = () => {
   const requestIdRef = useRef<string | null>(null);
   const sourceTextRef = useRef('');
   const resultTextRef = useRef('');
+  const selectedTextSnapshotRef = useRef('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const resetPromptState = useCallback(async (cancelActiveRequest = false) => {
@@ -75,7 +79,11 @@ const PromptApp: React.FC = () => {
     sourceTextRef.current = '';
     resultTextRef.current = '';
 
-    const selectedText = String(await window.electron.getSelectedText() || '');
+    const liveSelectedText = String(await window.electron.getSelectedText() || '');
+    const selectedText =
+      liveSelectedText.trim().length > 0
+        ? liveSelectedText
+        : String(selectedTextSnapshotRef.current || '');
     if (selectedText.trim().length > 0) sourceTextRef.current = selectedText;
 
     const requestId = `prompt-window-${Date.now()}`;
@@ -102,8 +110,46 @@ const PromptApp: React.FC = () => {
   }, [promptText, status]);
 
   useEffect(() => {
+    let disposed = false;
+    window.electron.getSettings()
+      .then((settings) => {
+        if (!disposed) {
+          applyAppFontSize(settings.fontSize);
+          applyUiStyle(settings.uiStyle || 'default');
+          applyBaseColor(settings.baseColor || '#101113');
+        }
+      })
+      .catch(() => {
+        if (!disposed) {
+          applyAppFontSize(getDefaultAppFontSize());
+          applyUiStyle('default');
+        }
+      });
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const cleanup = window.electron.onSettingsUpdated?.((settings) => {
+      applyAppFontSize(settings.fontSize);
+      applyUiStyle(settings.uiStyle || 'default');
+      applyBaseColor(settings.baseColor || '#101113');
+    });
+    return cleanup;
+  }, []);
+
+  useEffect(() => {
     const timer = setTimeout(() => textareaRef.current?.focus(), 50);
     return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    const cleanupWindowShown = window.electron.onWindowShown((payload) => {
+      if (payload?.mode !== 'prompt') return;
+      selectedTextSnapshotRef.current = String(payload?.selectedTextSnapshot || '');
+    });
+    return cleanupWindowShown;
   }, []);
 
   useEffect(() => {

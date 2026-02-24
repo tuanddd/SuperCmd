@@ -85,8 +85,8 @@ function getNativeBinaryPath(name: string): string {
 
 // ─── Window Configuration ───────────────────────────────────────────
 
-const DEFAULT_WINDOW_WIDTH = 860;
-const DEFAULT_WINDOW_HEIGHT = 540;
+const DEFAULT_WINDOW_WIDTH = 800;
+const DEFAULT_WINDOW_HEIGHT = 500;
 const ONBOARDING_WINDOW_WIDTH = 1120;
 const ONBOARDING_WINDOW_HEIGHT = 740;
 const CURSOR_PROMPT_WINDOW_WIDTH = 500;
@@ -99,7 +99,11 @@ const DETACHED_WHISPER_WINDOW_NAME = 'supercmd-whisper-window';
 const DETACHED_WHISPER_ONBOARDING_WINDOW_NAME = 'supercmd-whisper-onboarding-window';
 const DETACHED_SPEAK_WINDOW_NAME = 'supercmd-speak-window';
 const DETACHED_PROMPT_WINDOW_NAME = 'supercmd-prompt-window';
+const DETACHED_MEMORY_STATUS_WINDOW_NAME = 'supercmd-memory-status-window';
 const DETACHED_WINDOW_QUERY_KEY = 'sc_detached';
+const MEMORY_STATUS_WINDOW_WIDTH = 340;
+const MEMORY_STATUS_WINDOW_HEIGHT = 60;
+const MEMORY_STATUS_AUTOHIDE_MS = 3000;
 type LauncherMode = 'default' | 'onboarding' | 'whisper' | 'speak' | 'prompt';
 
 function parsePopupFeatures(rawFeatures: string): {
@@ -131,15 +135,18 @@ function resolveDetachedPopupName(details: any): string | null {
     byFrameName === DETACHED_WHISPER_ONBOARDING_WINDOW_NAME ||
     byFrameName === DETACHED_SPEAK_WINDOW_NAME ||
     byFrameName === DETACHED_PROMPT_WINDOW_NAME ||
+    byFrameName === DETACHED_MEMORY_STATUS_WINDOW_NAME ||
     byFrameName.startsWith(`${DETACHED_WHISPER_WINDOW_NAME}-`) ||
     byFrameName.startsWith(`${DETACHED_WHISPER_ONBOARDING_WINDOW_NAME}-`) ||
     byFrameName.startsWith(`${DETACHED_SPEAK_WINDOW_NAME}-`) ||
-    byFrameName.startsWith(`${DETACHED_PROMPT_WINDOW_NAME}-`)
+    byFrameName.startsWith(`${DETACHED_PROMPT_WINDOW_NAME}-`) ||
+    byFrameName.startsWith(`${DETACHED_MEMORY_STATUS_WINDOW_NAME}-`)
   ) {
     if (byFrameName.startsWith(DETACHED_WHISPER_WINDOW_NAME)) return DETACHED_WHISPER_WINDOW_NAME;
     if (byFrameName.startsWith(DETACHED_WHISPER_ONBOARDING_WINDOW_NAME)) return DETACHED_WHISPER_ONBOARDING_WINDOW_NAME;
     if (byFrameName.startsWith(DETACHED_SPEAK_WINDOW_NAME)) return DETACHED_SPEAK_WINDOW_NAME;
     if (byFrameName.startsWith(DETACHED_PROMPT_WINDOW_NAME)) return DETACHED_PROMPT_WINDOW_NAME;
+    if (byFrameName.startsWith(DETACHED_MEMORY_STATUS_WINDOW_NAME)) return DETACHED_MEMORY_STATUS_WINDOW_NAME;
     return byFrameName;
   }
   const rawUrl = String(details?.url || '').trim();
@@ -151,7 +158,8 @@ function resolveDetachedPopupName(details: any): string | null {
       byQuery === DETACHED_WHISPER_WINDOW_NAME ||
       byQuery === DETACHED_WHISPER_ONBOARDING_WINDOW_NAME ||
       byQuery === DETACHED_SPEAK_WINDOW_NAME ||
-      byQuery === DETACHED_PROMPT_WINDOW_NAME
+      byQuery === DETACHED_PROMPT_WINDOW_NAME ||
+      byQuery === DETACHED_MEMORY_STATUS_WINDOW_NAME
     ) {
       return byQuery;
     }
@@ -169,6 +177,13 @@ function computeDetachedPopupPosition(
   const workArea = display?.workArea || screen.getPrimaryDisplay().workArea;
 
   if (popupName === DETACHED_SPEAK_WINDOW_NAME) {
+    return {
+      x: workArea.x + workArea.width - width - 20,
+      y: workArea.y + 16,
+    };
+  }
+
+  if (popupName === DETACHED_MEMORY_STATUS_WINDOW_NAME) {
     return {
       x: workArea.x + workArea.width - width - 20,
       y: workArea.y + 16,
@@ -238,6 +253,10 @@ function computeDetachedPopupPosition(
 let mainWindow: InstanceType<typeof BrowserWindow> | null = null;
 let promptWindow: InstanceType<typeof BrowserWindow> | null = null;
 let promptWindowPrewarmScheduled = false;
+let memoryStatusWindow: InstanceType<typeof BrowserWindow> | null = null;
+let memoryStatusHideTimer: NodeJS.Timeout | null = null;
+let memoryStatusRenderSeq = 0;
+let memoryStatusHideTimerSeq = 0;
 let settingsWindow: InstanceType<typeof BrowserWindow> | null = null;
 let extensionStoreWindow: InstanceType<typeof BrowserWindow> | null = null;
 let isVisible = false;
@@ -258,6 +277,238 @@ let globalShortcutRegistrationState: {
 const OPENING_SHORTCUT_SUPPRESSION_MS = 220;
 let openingShortcutSuppressionUntil = 0;
 let openingShortcutToSuppress = '';
+
+function getMemoryStatusWindowHtml(
+  variant: 'processing' | 'success' | 'error' = 'processing',
+  text: string = ''
+): string {
+  const safeVariant =
+    variant === 'success' || variant === 'error' ? variant : 'processing';
+  const safeText = String(text || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      background: transparent;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+      -webkit-font-smoothing: antialiased;
+      user-select: none;
+      pointer-events: none;
+    }
+    .wrap {
+      width: 100%;
+      height: 100%;
+      padding: 6px;
+      box-sizing: border-box;
+    }
+    .card {
+      height: 100%;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(12,12,14,0.78);
+      box-shadow: 0 12px 32px rgba(0,0,0,0.35);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 12px;
+      box-sizing: border-box;
+      color: rgba(255,255,255,0.92);
+    }
+    .card.success {
+      border-color: rgba(52, 211, 153, 0.28);
+      background: rgba(2, 44, 34, 0.72);
+      color: rgb(209, 250, 229);
+    }
+    .card.error {
+      border-color: rgba(251, 113, 133, 0.3);
+      background: rgba(76, 5, 25, 0.72);
+      color: rgb(255, 228, 230);
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.9);
+      flex: 0 0 auto;
+      box-shadow: 0 0 0 4px rgba(255,255,255,0.10);
+    }
+    .card.processing .dot {
+      animation: pulse 1s ease-in-out infinite;
+    }
+    .card.success .dot {
+      background: rgb(52, 211, 153);
+      box-shadow: 0 0 0 4px rgba(52, 211, 153, 0.18);
+    }
+    .card.error .dot {
+      background: rgb(251, 113, 133);
+      box-shadow: 0 0 0 4px rgba(251, 113, 133, 0.18);
+    }
+    .text {
+      font-size: 12px;
+      font-weight: 600;
+      line-height: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    @keyframes pulse {
+      0%, 100% { transform: scale(0.9); opacity: 0.85; }
+      50% { transform: scale(1.15); opacity: 1; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div id="card" class="card ${safeVariant}">
+      <div class="dot"></div>
+      <div id="text" class="text">${safeText}</div>
+    </div>
+  </div>
+</body>
+</html>`;
+}
+
+function clearMemoryStatusHideTimer(): void {
+  if (!memoryStatusHideTimer) return;
+  clearTimeout(memoryStatusHideTimer);
+  memoryStatusHideTimer = null;
+  memoryStatusHideTimerSeq = 0;
+}
+
+function hideMemoryStatusBar(): void {
+  clearMemoryStatusHideTimer();
+  memoryStatusRenderSeq += 1;
+  if (!memoryStatusWindow || memoryStatusWindow.isDestroyed()) return;
+  try {
+    memoryStatusWindow.hide();
+  } catch {}
+}
+
+async function ensureMemoryStatusWindow(): Promise<InstanceType<typeof BrowserWindow> | null> {
+  if (memoryStatusWindow && !memoryStatusWindow.isDestroyed()) return memoryStatusWindow;
+  memoryStatusWindow = new BrowserWindow({
+    width: MEMORY_STATUS_WINDOW_WIDTH,
+    height: MEMORY_STATUS_WINDOW_HEIGHT,
+    frame: false,
+    titleBarStyle: 'hidden',
+    titleBarOverlay: false,
+    hasShadow: false,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    focusable: false,
+    show: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+    },
+  });
+  try { memoryStatusWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch {}
+  try { memoryStatusWindow.setIgnoreMouseEvents(true, { forward: true }); } catch {}
+  if (process.platform === 'darwin') {
+    try { memoryStatusWindow.setWindowButtonVisibility(false); } catch {}
+  }
+  memoryStatusWindow.on('closed', () => {
+    memoryStatusRenderSeq += 1;
+    memoryStatusWindow = null;
+    clearMemoryStatusHideTimer();
+  });
+  try {
+    await memoryStatusWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(getMemoryStatusWindowHtml())}`);
+  } catch (error) {
+    console.warn('[MemoryStatus] Failed to load status window:', error);
+    try { memoryStatusWindow.close(); } catch {}
+    memoryStatusWindow = null;
+    return null;
+  }
+  return memoryStatusWindow;
+}
+
+async function renderMemoryStatusBarContent(
+  win: InstanceType<typeof BrowserWindow>,
+  payload: { variant: 'processing' | 'success' | 'error'; text: string },
+  renderSeq: number,
+): Promise<void> {
+  if (!memoryStatusWindow || memoryStatusWindow.isDestroyed()) return;
+  if (renderSeq !== memoryStatusRenderSeq) return;
+  if (!win.webContents || win.webContents.isDestroyed()) return;
+  try {
+    await win.loadURL(
+      `data:text/html;charset=utf-8,${encodeURIComponent(
+        getMemoryStatusWindowHtml(payload.variant, payload.text)
+      )}`
+    );
+  } catch (error) {
+    if (renderSeq === memoryStatusRenderSeq) {
+      console.warn('[MemoryStatus] Failed to render status content:', error);
+    }
+  }
+}
+
+async function showMemoryStatusBar(
+  variant: 'processing' | 'success' | 'error',
+  text: string
+): Promise<void> {
+  const renderSeq = ++memoryStatusRenderSeq;
+  const win = await ensureMemoryStatusWindow();
+  if (!win) return;
+  clearMemoryStatusHideTimer();
+  const pos = computeDetachedPopupPosition(
+    DETACHED_MEMORY_STATUS_WINDOW_NAME,
+    MEMORY_STATUS_WINDOW_WIDTH,
+    MEMORY_STATUS_WINDOW_HEIGHT
+  );
+  try {
+    win.setBounds({
+      x: pos.x,
+      y: pos.y,
+      width: MEMORY_STATUS_WINDOW_WIDTH,
+      height: MEMORY_STATUS_WINDOW_HEIGHT,
+    });
+  } catch {}
+  try {
+    if (win.webContents && !win.webContents.isDestroyed()) {
+      await renderMemoryStatusBarContent(win, { variant, text: String(text || '') }, renderSeq);
+    }
+  } catch {}
+  if (renderSeq !== memoryStatusRenderSeq) return;
+  try {
+    if (!win.isVisible()) {
+      if (typeof (win as any).showInactive === 'function') (win as any).showInactive();
+      else win.show();
+    } else {
+      win.show();
+    }
+    win.moveTop();
+  } catch {}
+
+  if (variant !== 'processing') {
+    if (renderSeq !== memoryStatusRenderSeq) return;
+    memoryStatusHideTimerSeq = renderSeq;
+    memoryStatusHideTimer = setTimeout(() => {
+      if (memoryStatusHideTimerSeq !== renderSeq) return;
+      hideMemoryStatusBar();
+    }, MEMORY_STATUS_AUTOHIDE_MS);
+  }
+}
 type AppUpdaterState =
   | 'idle'
   | 'unsupported'
@@ -284,6 +535,8 @@ let appUpdaterConfigured = false;
 let appUpdater: any | null = null;
 let appUpdaterCheckPromise: Promise<void> | null = null;
 let appUpdaterDownloadPromise: Promise<void> | null = null;
+const APP_UPDATER_AUTO_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+let appUpdaterAutoCheckTimer: NodeJS.Timeout | null = null;
 let appUpdaterStatusSnapshot: AppUpdaterStatusSnapshot = {
   state: 'idle',
   supported: false,
@@ -293,6 +546,37 @@ let appUpdaterStatusSnapshot: AppUpdaterStatusSnapshot = {
   totalBytes: 0,
   bytesPerSecond: 0,
 };
+
+function readAppUpdaterLastCheckedAt(): number {
+  const raw = Number((loadSettings() as any).appUpdaterLastCheckedAt || 0);
+  if (!Number.isFinite(raw) || raw <= 0) return 0;
+  return Math.floor(raw);
+}
+
+function persistAppUpdaterLastCheckedAt(timestampMs: number): void {
+  const safeValue = Math.max(0, Math.floor(Number(timestampMs) || 0));
+  const current = readAppUpdaterLastCheckedAt();
+  if (safeValue <= 0 || current === safeValue) return;
+  saveSettings({ appUpdaterLastCheckedAt: safeValue } as Partial<AppSettings>);
+}
+
+function clearAppUpdaterAutoCheckTimer(): void {
+  if (appUpdaterAutoCheckTimer) {
+    clearTimeout(appUpdaterAutoCheckTimer);
+    appUpdaterAutoCheckTimer = null;
+  }
+}
+
+function scheduleNextAppUpdaterAutoCheck(lastCheckedAtMs: number): void {
+  clearAppUpdaterAutoCheckTimer();
+  if (!app.isPackaged) return;
+  const ageMs = Math.max(0, Date.now() - Math.max(0, lastCheckedAtMs));
+  const delayMs = Math.max(60_000, APP_UPDATER_AUTO_CHECK_INTERVAL_MS - ageMs);
+  appUpdaterAutoCheckTimer = setTimeout(() => {
+    appUpdaterAutoCheckTimer = null;
+    void runBackgroundAppUpdaterCheck();
+  }, delayMs);
+}
 let lastFrontmostApp: { name: string; path: string; bundleId?: string } | null = null;
 const registeredHotkeys = new Map<string, string>(); // shortcut → commandId
 const activeAIRequests = new Map<string, AbortController>(); // requestId → controller
@@ -311,6 +595,10 @@ let fnSpeakToggleWatcherProcess: any = null;
 let fnSpeakToggleWatcherStdoutBuffer = '';
 let fnSpeakToggleWatcherRestartTimer: NodeJS.Timeout | null = null;
 let fnSpeakToggleWatcherEnabled = false;
+const fnCommandWatcherProcesses = new Map<string, any>();
+const fnCommandWatcherStdoutBuffers = new Map<string, string>();
+const fnCommandWatcherRestartTimers = new Map<string, NodeJS.Timeout>();
+const fnCommandWatcherConfigs = new Map<string, string>();
 // When true, the Fn watcher is allowed to start even during onboarding (step 4 — Dictation test).
 let fnWatcherOnboardingOverride = false;
 let fnSpeakToggleLastPressedAt = 0;
@@ -1814,11 +2102,65 @@ function normalizeAccelerator(shortcut: string): string {
   const parts = raw.split('+').map((p) => p.trim()).filter(Boolean);
   if (parts.length === 0) return raw;
   const key = parts[parts.length - 1];
+  const modifierTokens = parts.slice(0, -1).map((part) => String(part || '').trim().toLowerCase());
+
+  const normalizedModifiers = {
+    command: false,
+    control: false,
+    alt: false,
+    shift: false,
+    fn: false,
+  };
+
+  // Hyper support temporarily disabled. Keep raw accelerator to avoid
+  // accidentally downgrading "Hyper+X" to plain "X".
+  const hasHyper = modifierTokens.some((token) => token === 'hyper' || token === '✦');
+  if (hasHyper) {
+    return raw;
+  }
+
+  for (const token of modifierTokens) {
+    if (token === 'commandorcontrol' || token === 'cmdorctrl') {
+      if (process.platform === 'darwin') normalizedModifiers.command = true;
+      else normalizedModifiers.control = true;
+      continue;
+    }
+    if (token === 'cmd' || token === 'command' || token === 'meta' || token === 'super') {
+      normalizedModifiers.command = true;
+      continue;
+    }
+    if (token === 'ctrl' || token === 'control') {
+      normalizedModifiers.control = true;
+      continue;
+    }
+    if (token === 'alt' || token === 'option') {
+      normalizedModifiers.alt = true;
+      continue;
+    }
+    if (token === 'shift') {
+      normalizedModifiers.shift = true;
+      continue;
+    }
+    if (token === 'fn' || token === 'function') {
+      normalizedModifiers.fn = true;
+      continue;
+    }
+  }
+
   // Keep punctuation keys as punctuation for Electron accelerator parsing.
   if (/^period$/i.test(key)) {
     parts[parts.length - 1] = '.';
   }
-  return parts.join('+');
+
+  const keyPart = parts[parts.length - 1];
+  const output: string[] = [];
+  if (normalizedModifiers.command) output.push('Command');
+  if (normalizedModifiers.control) output.push('Control');
+  if (normalizedModifiers.alt) output.push('Alt');
+  if (normalizedModifiers.shift) output.push('Shift');
+  if (normalizedModifiers.fn) output.push('Fn');
+  output.push(keyPart);
+  return output.join('+');
 }
 
 function normalizeShortcutKeyToken(token: string): string {
@@ -1884,6 +2226,11 @@ function isFnOnlyShortcut(shortcut: string): boolean {
   return normalized === 'fn' || normalized === 'function';
 }
 
+function isFnShortcut(shortcut: string): boolean {
+  const config = parseHoldShortcutConfig(shortcut);
+  return Boolean(config?.fn);
+}
+
 function parseHoldShortcutConfig(shortcut: string): {
   keyCode: number;
   cmd: boolean;
@@ -1942,6 +2289,99 @@ function stopFnSpeakToggleWatcher(): void {
   fnSpeakToggleWatcherStdoutBuffer = '';
 }
 
+function stopFnCommandWatcher(commandId: string): void {
+  const timer = fnCommandWatcherRestartTimers.get(commandId);
+  if (timer) {
+    clearTimeout(timer);
+    fnCommandWatcherRestartTimers.delete(commandId);
+  }
+  const proc = fnCommandWatcherProcesses.get(commandId);
+  if (proc) {
+    try { proc.kill('SIGTERM'); } catch {}
+    fnCommandWatcherProcesses.delete(commandId);
+  }
+  fnCommandWatcherStdoutBuffers.delete(commandId);
+}
+
+function stopAllFnCommandWatchers(): void {
+  for (const commandId of Array.from(fnCommandWatcherProcesses.keys())) {
+    stopFnCommandWatcher(commandId);
+  }
+  fnCommandWatcherConfigs.clear();
+}
+
+function startFnCommandWatcher(commandId: string, shortcut: string): void {
+  const configuredShortcut = String(fnCommandWatcherConfigs.get(commandId) || '').trim();
+  if (!configuredShortcut || configuredShortcut !== String(shortcut || '').trim()) return;
+  if (fnCommandWatcherProcesses.has(commandId)) return;
+  const config = parseHoldShortcutConfig(shortcut);
+  if (!config || !config.fn) return;
+  const binaryPath = ensureWhisperHoldWatcherBinary();
+  if (!binaryPath) return;
+
+  const { spawn } = require('child_process');
+  const proc = spawn(
+    binaryPath,
+    [
+      String(config.keyCode),
+      config.cmd ? '1' : '0',
+      config.ctrl ? '1' : '0',
+      config.alt ? '1' : '0',
+      config.shift ? '1' : '0',
+      config.fn ? '1' : '0',
+    ],
+    { stdio: ['ignore', 'pipe', 'pipe'] }
+  );
+
+  fnCommandWatcherProcesses.set(commandId, proc);
+  fnCommandWatcherStdoutBuffers.set(commandId, '');
+
+  proc.stdout.on('data', (chunk: Buffer | string) => {
+    const prev = fnCommandWatcherStdoutBuffers.get(commandId) || '';
+    const next = `${prev}${chunk.toString()}`;
+    const lines = next.split('\n');
+    fnCommandWatcherStdoutBuffers.set(commandId, lines.pop() || '');
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        const payload = JSON.parse(trimmed);
+        if (payload?.pressed) {
+          void runCommandById(commandId, 'hotkey');
+        }
+      } catch {}
+    }
+  });
+
+  proc.stderr.on('data', (chunk: Buffer | string) => {
+    const text = chunk.toString().trim();
+    if (text) console.warn('[Hotkey][fn-watcher]', text);
+  });
+
+  const scheduleRestart = () => {
+    if (!fnCommandWatcherConfigs.has(commandId)) return;
+    const restartTimer = setTimeout(() => {
+      fnCommandWatcherRestartTimers.delete(commandId);
+      const desired = fnCommandWatcherConfigs.get(commandId);
+      if (!desired) return;
+      startFnCommandWatcher(commandId, desired);
+    }, 120);
+    fnCommandWatcherRestartTimers.set(commandId, restartTimer);
+  };
+
+  proc.on('error', () => {
+    fnCommandWatcherProcesses.delete(commandId);
+    fnCommandWatcherStdoutBuffers.delete(commandId);
+    scheduleRestart();
+  });
+
+  proc.on('exit', () => {
+    fnCommandWatcherProcesses.delete(commandId);
+    fnCommandWatcherStdoutBuffers.delete(commandId);
+    scheduleRestart();
+  });
+}
+
 function startFnSpeakToggleWatcher(): void {
   if (fnSpeakToggleWatcherProcess || !fnSpeakToggleWatcherEnabled) return;
   const config = parseHoldShortcutConfig('Fn');
@@ -1974,6 +2414,10 @@ function startFnSpeakToggleWatcher(): void {
       try {
         const payload = JSON.parse(trimmed);
         if (payload?.pressed) {
+          const currentSettings = loadSettings();
+          if (isAIDisabledInSettings(currentSettings) || currentSettings.ai?.whisperEnabled === false) {
+            continue;
+          }
           const now = Date.now();
           if (now - fnSpeakToggleLastPressedAt < 180) continue;
           fnSpeakToggleLastPressedAt = now;
@@ -2048,6 +2492,11 @@ function syncFnSpeakToggleWatcher(hotkeys: Record<string, string>): void {
     stopFnSpeakToggleWatcher();
     return;
   }
+  const currentSettings = loadSettings();
+  if (isAIDisabledInSettings(currentSettings) || currentSettings.ai?.whisperEnabled === false) {
+    stopFnSpeakToggleWatcher();
+    return;
+  }
   const speakToggle = String(hotkeys?.['system-supercmd-whisper-speak-toggle'] || '').trim();
   const shouldEnable = isFnOnlyShortcut(speakToggle);
   if (!shouldEnable) {
@@ -2056,6 +2505,37 @@ function syncFnSpeakToggleWatcher(hotkeys: Record<string, string>): void {
   }
   fnSpeakToggleWatcherEnabled = true;
   startFnSpeakToggleWatcher();
+}
+
+function syncFnCommandWatchers(hotkeys: Record<string, string>): void {
+  const desired = new Map<string, string>();
+  for (const [commandId, shortcutRaw] of Object.entries(hotkeys || {})) {
+    const shortcut = String(shortcutRaw || '').trim();
+    if (!shortcut) continue;
+    const normalized = normalizeAccelerator(shortcut);
+    const isFnSpeakToggle = commandId === 'system-supercmd-whisper-speak-toggle' && isFnOnlyShortcut(normalized);
+    if (isFnSpeakToggle) continue;
+    if (!isFnShortcut(normalized)) continue;
+    desired.set(commandId, normalized);
+  }
+
+  for (const existingCommandId of Array.from(fnCommandWatcherConfigs.keys())) {
+    const nextShortcut = desired.get(existingCommandId);
+    const currentShortcut = fnCommandWatcherConfigs.get(existingCommandId);
+    if (!nextShortcut || nextShortcut !== currentShortcut) {
+      fnCommandWatcherConfigs.delete(existingCommandId);
+      stopFnCommandWatcher(existingCommandId);
+    }
+  }
+
+  for (const [commandId, shortcut] of desired.entries()) {
+    const current = fnCommandWatcherConfigs.get(commandId);
+    if (current !== shortcut) {
+      fnCommandWatcherConfigs.set(commandId, shortcut);
+      stopFnCommandWatcher(commandId);
+    }
+    startFnCommandWatcher(commandId, shortcut);
+  }
 }
 
 function ensureWhisperHoldWatcherBinary(): string | null {
@@ -2221,6 +2701,64 @@ app.on('open-url', (event: any, url: string) => {
 // ─── Menu Bar (Tray) Management ─────────────────────────────────────
 
 const menuBarTrays = new Map<string, InstanceType<typeof Tray>>();
+let appTray: InstanceType<typeof Tray> | null = null;
+
+function loadAppTrayIcon(): any {
+  const fs = require('fs');
+  const candidates = [
+    path.join(process.cwd(), 'supercmd.png'),
+    path.join(app.getAppPath(), 'supercmd.png'),
+    path.join(process.resourcesPath || '', 'supercmd.png'),
+    path.join(process.resourcesPath || '', 'supercmd.icns'),
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    try {
+      if (!candidate || !fs.existsSync(candidate)) continue;
+      const icon = nativeImage.createFromPath(candidate);
+      if (!icon || icon.isEmpty()) continue;
+      const resized = icon.resize({ width: 18, height: 18 });
+      // Use template rendering on macOS so the icon adapts to light/dark menu bar.
+      if (process.platform === 'darwin') {
+        try { resized.setTemplateImage(true); } catch {}
+      }
+      return resized;
+    } catch {}
+  }
+
+  return nativeImage.createEmpty();
+}
+
+function ensureAppTray(): void {
+  if (appTray) return;
+
+  try {
+    const icon = loadAppTrayIcon();
+    appTray = new Tray(icon);
+    appTray.setToolTip('SuperCmd');
+    appTray.setContextMenu(
+      Menu.buildFromTemplate([
+        {
+          label: 'Open SuperCmd',
+          click: () => {
+            void openLauncherFromUserEntry();
+          },
+        },
+        { type: 'separator' },
+        {
+          label: 'Quit SuperCmd',
+          click: () => {
+            app.quit();
+          },
+        },
+      ])
+    );
+
+  } catch (error) {
+    console.warn('[Tray] Failed to create app tray:', error);
+    appTray = null;
+  }
+}
 
 // ─── URL Helpers ────────────────────────────────────────────────────
 
@@ -2393,17 +2931,14 @@ function createWindow(): void {
     height: DEFAULT_WINDOW_HEIGHT,
     x: Math.floor((screenWidth - DEFAULT_WINDOW_WIDTH) / 2),
     y: Math.floor(screenHeight * 0.2),
-    titleBarStyle: 'hidden',
-    titleBarOverlay: false,
-    hasShadow: true,
+    frame: false,
+    hasShadow: false,
     resizable: false,
     skipTaskbar: true,
     alwaysOnTop: true,
     show: false,
     transparent: true,
     backgroundColor: '#00000000',
-    vibrancy: 'fullscreen-ui',
-    visualEffectState: 'active',
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -2452,6 +2987,8 @@ function createWindow(): void {
         ? 920
       : detachedPopupName === DETACHED_PROMPT_WINDOW_NAME
         ? CURSOR_PROMPT_WINDOW_WIDTH
+      : detachedPopupName === DETACHED_MEMORY_STATUS_WINDOW_NAME
+        ? 340
         : 520;
     const defaultHeight = detachedPopupName === DETACHED_WHISPER_WINDOW_NAME
       ? 52
@@ -2459,6 +2996,8 @@ function createWindow(): void {
         ? 640
       : detachedPopupName === DETACHED_PROMPT_WINDOW_NAME
         ? CURSOR_PROMPT_WINDOW_HEIGHT
+      : detachedPopupName === DETACHED_MEMORY_STATUS_WINDOW_NAME
+        ? 60
         : 112;
     const finalWidth = typeof popupBounds.width === 'number' ? popupBounds.width : defaultWidth;
     const finalHeight = typeof popupBounds.height === 'number' ? popupBounds.height : defaultHeight;
@@ -2479,6 +3018,8 @@ function createWindow(): void {
               ? 'SuperCmd Whisper Onboarding'
             : detachedPopupName === DETACHED_PROMPT_WINDOW_NAME
               ? 'SuperCmd Prompt'
+              : detachedPopupName === DETACHED_MEMORY_STATUS_WINDOW_NAME
+                ? 'SuperCmd Status'
               : 'SuperCmd Read',
         frame: false,
         titleBarStyle: 'hidden',
@@ -2492,7 +3033,9 @@ function createWindow(): void {
         minimizable: false,
         maximizable: false,
         fullscreenable: false,
-        focusable: detachedPopupName !== DETACHED_WHISPER_WINDOW_NAME,
+        focusable:
+          detachedPopupName !== DETACHED_WHISPER_WINDOW_NAME &&
+          detachedPopupName !== DETACHED_MEMORY_STATUS_WINDOW_NAME,
         skipTaskbar: true,
         alwaysOnTop: true,
         show: true,
@@ -2534,6 +3077,12 @@ function createWindow(): void {
       childWindow.on('closed', () => {
         if (whisperChildWindow === childWindow) whisperChildWindow = null;
       });
+      return;
+    }
+
+    if (detachedPopupName === DETACHED_MEMORY_STATUS_WINDOW_NAME) {
+      try { childWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch {}
+      try { childWindow.setIgnoreMouseEvents(true, { forward: true }); } catch {}
     }
   });
 
@@ -2808,6 +3357,11 @@ function showPromptWindow(
   promptWindow.focus();
   promptWindow.moveTop();
   promptWindow.webContents.focus();
+  const selectedTextSnapshot = String(getRecentSelectionSnapshot() || lastCursorPromptSelection || '').trim();
+  promptWindow.webContents.send('window-shown', {
+    mode: 'prompt',
+    selectedTextSnapshot,
+  });
 }
 
 function hidePromptWindow(): void {
@@ -3161,9 +3715,10 @@ async function showWindow(options?: { systemCommandId?: string }): Promise<void>
   // Skip during onboarding to avoid any focus-stealing side effects during setup.
   if (launcherMode !== 'onboarding') {
     captureFrontmostAppContext();
-    // Snapshot selected text for contextual commands without stealing selection
-    // or triggering system beep from synthetic Cmd+C.
-    selectionSnapshotPromise = captureSelectionSnapshotBeforeShow({ allowClipboardFallback: false });
+    // Snapshot selected text before launcher focus changes the active app.
+    // Clipboard fallback is enabled so selection works in apps that do not
+    // expose AXSelectedText.
+    selectionSnapshotPromise = captureSelectionSnapshotBeforeShow({ allowClipboardFallback: true });
   }
 
   applyLauncherBounds(launcherMode);
@@ -3730,7 +4285,44 @@ async function dispatchRendererCustomEvent(eventName: string, detail: any): Prom
   return true;
 }
 
+const AI_DISABLED_SYSTEM_COMMANDS = new Set<string>([
+  'system-cursor-prompt',
+  'system-add-to-memory',
+  'system-supercmd-whisper',
+  'system-supercmd-whisper-toggle',
+  'system-supercmd-whisper-speak-toggle',
+  'system-supercmd-speak',
+]);
+
+function isAIDisabledInSettings(settings?: AppSettings): boolean {
+  const resolved = settings || loadSettings();
+  return resolved.ai?.enabled === false;
+}
+
+function isAIDependentSystemCommand(commandId: string): boolean {
+  return AI_DISABLED_SYSTEM_COMMANDS.has(String(commandId || '').trim());
+}
+
+function isAISectionDisabledForCommand(commandId: string, settings?: AppSettings): boolean {
+  const resolved = settings || loadSettings();
+  const id = String(commandId || '').trim();
+  if (!id) return false;
+  if (id === 'system-supercmd-speak') return resolved.ai?.readEnabled === false;
+  if (id === 'system-supercmd-whisper' || id === 'system-supercmd-whisper-toggle' || id === 'system-supercmd-whisper-speak-toggle') {
+    return resolved.ai?.whisperEnabled === false;
+  }
+  if (id === 'system-cursor-prompt' || id === 'system-add-to-memory') return resolved.ai?.llmEnabled === false;
+  return false;
+}
+
 async function runCommandById(commandId: string, source: 'launcher' | 'hotkey' = 'launcher'): Promise<boolean> {
+  if (isAIDependentSystemCommand(commandId) && isAIDisabledInSettings()) {
+    return false;
+  }
+  if (isAISectionDisabledForCommand(commandId)) {
+    return false;
+  }
+
   const isWhisperOpenCommand =
     commandId === 'system-supercmd-whisper' ||
     commandId === 'system-supercmd-whisper-toggle';
@@ -3812,7 +4404,16 @@ async function runCommandById(commandId: string, source: 'launcher' | 'hotkey' =
     return true;
   }
   if (isCursorPromptCommand) {
-    lastCursorPromptSelection = '';
+    const selectedBeforeOpenRaw = String(
+      await getSelectedTextForSpeak({ allowClipboardFallback: true }) || getRecentSelectionSnapshot() || ''
+    );
+    const selectedBeforeOpen = selectedBeforeOpenRaw.trim();
+    if (selectedBeforeOpen) {
+      rememberSelectionSnapshot(selectedBeforeOpenRaw);
+      lastCursorPromptSelection = selectedBeforeOpenRaw;
+    } else {
+      lastCursorPromptSelection = String(getRecentSelectionSnapshot() || '');
+    }
     captureFrontmostAppContext();
     // Capture caret/input anchor before prompt focus changes active UI element.
     const earlyCaretRect = getTypingCaretRect();
@@ -3828,8 +4429,7 @@ async function runCommandById(commandId: string, source: 'launcher' | 'hotkey' =
     }
     // Open anchored to the captured typing caret (not mouse pointer).
     showPromptWindow(earlyCaretRect, earlyInputRect);
-    // Snapshot selection in background without synthetic Cmd+C fallback so open
-    // is not blocked and does not trigger beeps in the active app.
+    // Refresh selection in the background for AX-compatible apps.
     void getSelectedTextForSpeak({ allowClipboardFallback: false, clipboardWaitMs: 0 })
       .then((selectedBeforeOpen) => {
         const selected = String(selectedBeforeOpen || '').trim();
@@ -3840,18 +4440,28 @@ async function runCommandById(commandId: string, source: 'launcher' | 'hotkey' =
     return true;
   }
   if (commandId === 'system-add-to-memory') {
-    const selectedTextRaw = String(await getSelectedTextForSpeak() || getRecentSelectionSnapshot() || '');
+    const selectedTextRaw = String(
+      await getSelectedTextForSpeak({
+        allowClipboardFallback: source !== 'launcher',
+      }) || getRecentSelectionSnapshot() || ''
+    );
     const selectedText = selectedTextRaw.trim();
-    if (!selectedText) return false;
+    if (!selectedText) {
+      void showMemoryStatusBar('error', 'No selected text found.');
+      return false;
+    }
     rememberSelectionSnapshot(selectedTextRaw);
+    void showMemoryStatusBar('processing', 'Adding to memory...');
     const result = await addMemory(loadSettings(), {
       text: selectedText,
       source: source === 'hotkey' ? 'hotkey' : 'launcher',
     });
     if (!result.success) {
       console.warn('[Supermemory] add memory failed:', result.error || 'Unknown error');
+      void showMemoryStatusBar('error', result.error || 'Failed to add to memory.');
       return false;
     }
+    void showMemoryStatusBar('success', 'Added to memory.');
     if (source === 'launcher') {
       setTimeout(() => hideWindow(), 50);
     }
@@ -3983,6 +4593,53 @@ async function runCommandById(commandId: string, source: 'launcher' | 'hotkey' =
       });
     } catch (error) {
       console.error(`Failed to launch script command via hotkey: ${commandId}`, error);
+      return false;
+    }
+  }
+
+  if (commandId === 'system-check-for-updates') {
+    try {
+      ensureAppUpdaterConfigured();
+      if (!appUpdater) {
+        console.warn('[Updater] Not available in development mode');
+        void showMemoryStatusBar('error', 'Updater not available.');
+        return false;
+      }
+      void showMemoryStatusBar('processing', 'Checking for updates...');
+      const checkStatus = await checkForAppUpdates();
+      if (checkStatus.state === 'not-available') {
+        console.log('[Updater] Already on latest version');
+        void showMemoryStatusBar('success', 'Already on latest version.');
+        return true;
+      }
+      if (checkStatus.state === 'error') {
+        void showMemoryStatusBar('error', checkStatus.message || 'Failed to check for updates.');
+        return false;
+      }
+      if (checkStatus.state === 'available') {
+        void showMemoryStatusBar('processing', 'Downloading update...');
+        const downloadStatus = await downloadAppUpdate();
+        if (downloadStatus.state === 'error') {
+          console.error('[Updater] Download failed:', downloadStatus.message);
+          void showMemoryStatusBar('error', downloadStatus.message || 'Failed to download update.');
+          return false;
+        }
+      }
+      if (appUpdaterStatusSnapshot.state === 'downloaded') {
+        void showMemoryStatusBar('processing', 'Restarting to install update...');
+        const installed = restartAndInstallAppUpdate();
+        if (installed) {
+          return true;
+        }
+        void showMemoryStatusBar('error', 'Failed to restart for update installation.');
+      }
+      if (appUpdaterStatusSnapshot.state !== 'downloaded') {
+        void showMemoryStatusBar('success', checkStatus.message || 'Update check complete.');
+      }
+      return true;
+    } catch (error) {
+      console.error('[Updater] Update flow failed:', error);
+      void showMemoryStatusBar('error', 'Update flow failed.');
       return false;
     }
   }
@@ -4544,7 +5201,7 @@ async function refineWhisperTranscript(input: string): Promise<{ correctedText: 
 
 // ─── Settings Window ────────────────────────────────────────────────
 
-type SettingsTabId = 'general' | 'ai' | 'extensions';
+type SettingsTabId = 'general' | 'ai' | 'extensions' | 'advanced';
 type SettingsPanelTarget = {
   extensionName?: string;
   commandName?: string;
@@ -4555,7 +5212,7 @@ type SettingsNavigationPayload = {
 };
 
 function normalizeSettingsTabId(input: any): SettingsTabId | undefined {
-  if (input === 'general' || input === 'ai' || input === 'extensions') return input;
+  if (input === 'general' || input === 'ai' || input === 'extensions' || input === 'advanced') return input;
   return undefined;
 }
 
@@ -4622,6 +5279,14 @@ function isCloseWindowShortcutInput(input: any): boolean {
   return Boolean(input.control) && !input.meta && !input.alt;
 }
 
+function isEscapeInput(input: any): boolean {
+  const inputType = String(input?.type || '').toLowerCase();
+  if (inputType !== 'keydown') return false;
+  const key = String(input?.key || '').toLowerCase();
+  const code = String(input?.code || '').toLowerCase();
+  return key === 'escape' || code === 'escape';
+}
+
 function isWindowDevToolsShortcutInput(input: any): boolean {
   const inputType = String(input?.type || '').toLowerCase();
   if (inputType !== 'keydown') return false;
@@ -4637,7 +5302,10 @@ function isWindowDevToolsShortcutInput(input: any): boolean {
   return Boolean(input.control) && Boolean(input.alt) && !input.meta && !input.shift;
 }
 
-function registerWindowKeyboardShortcuts(win: InstanceType<typeof BrowserWindow>): void {
+function registerWindowKeyboardShortcuts(
+  win: InstanceType<typeof BrowserWindow>,
+  options?: { closeOnEscape?: boolean }
+): void {
   win.webContents.on('before-input-event', (event: any, input: any) => {
     if (isWindowDevToolsShortcutInput(input)) {
       event.preventDefault();
@@ -4648,7 +5316,7 @@ function registerWindowKeyboardShortcuts(win: InstanceType<typeof BrowserWindow>
       return;
     }
 
-    if (!isCloseWindowShortcutInput(input)) return;
+    if (!isCloseWindowShortcutInput(input) && !(options?.closeOnEscape && isEscapeInput(input))) return;
     event.preventDefault();
     if (!win.isDestroyed()) {
       win.close();
@@ -4681,8 +5349,8 @@ function openSettingsWindow(payload?: SettingsNavigationPayload): void {
     }
     return screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
   })();
-  const settingsWidth = Math.max(1180, Math.min(1460, displayWidth - 64));
-  const settingsHeight = Math.max(760, Math.min(920, displayHeight - 64));
+  const settingsWidth = Math.max(1120, Math.min(1360, displayWidth - 96));
+  const settingsHeight = Math.max(720, Math.min(860, displayHeight - 96));
   const settingsX = displayX + Math.floor((displayWidth - settingsWidth) / 2);
   const settingsY = displayY + Math.floor((displayHeight - settingsHeight) / 2);
 
@@ -4691,14 +5359,15 @@ function openSettingsWindow(payload?: SettingsNavigationPayload): void {
     height: settingsHeight,
     x: settingsX,
     y: settingsY,
-    minWidth: 1180,
-    minHeight: 760,
+    minWidth: 1120,
+    minHeight: 720,
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 16, y: 16 },
     transparent: true,
     backgroundColor: '#00000000',
     vibrancy: 'hud',
     visualEffectState: 'active',
+    hasShadow: false,
     show: false,
     webPreferences: {
       nodeIntegration: false,
@@ -4767,6 +5436,7 @@ function openExtensionStoreWindow(): void {
     backgroundColor: '#00000000',
     vibrancy: 'hud',
     visualEffectState: 'active',
+    hasShadow: false,
     show: false,
     webPreferences: {
       nodeIntegration: false,
@@ -4774,7 +5444,7 @@ function openExtensionStoreWindow(): void {
       preload: path.join(__dirname, 'preload.js'),
     },
   });
-  registerWindowKeyboardShortcuts(extensionStoreWindow);
+  registerWindowKeyboardShortcuts(extensionStoreWindow, { closeOnEscape: true });
 
   loadWindowUrl(extensionStoreWindow, '/extension-store');
 
@@ -5087,7 +5757,32 @@ async function checkForAppUpdates(): Promise<AppUpdaterStatusSnapshot> {
     });
 
   await appUpdaterCheckPromise;
+  const checkedAt = Date.now();
+  persistAppUpdaterLastCheckedAt(checkedAt);
+  scheduleNextAppUpdaterAutoCheck(checkedAt);
   return { ...appUpdaterStatusSnapshot };
+}
+
+async function runBackgroundAppUpdaterCheck(): Promise<void> {
+  if (!app.isPackaged) return;
+  ensureAppUpdaterConfigured();
+  if (!appUpdater || appUpdaterStatusSnapshot.supported === false) return;
+
+  const lastCheckedAt = readAppUpdaterLastCheckedAt();
+  const now = Date.now();
+  if (lastCheckedAt > 0 && (now - lastCheckedAt) < APP_UPDATER_AUTO_CHECK_INTERVAL_MS) {
+    scheduleNextAppUpdaterAutoCheck(lastCheckedAt);
+    return;
+  }
+
+  try {
+    await checkForAppUpdates();
+  } catch {
+    // Keep background checks non-fatal.
+  } finally {
+    const latestCheckedAt = readAppUpdaterLastCheckedAt();
+    scheduleNextAppUpdaterAutoCheck(latestCheckedAt || Date.now());
+  }
 }
 
 async function downloadAppUpdate(): Promise<AppUpdaterStatusSnapshot> {
@@ -5309,6 +6004,9 @@ function registerCommandHotkeys(hotkeys: Record<string, string>): void {
     if (commandId === 'system-supercmd-whisper-speak-toggle' && isFnOnlyShortcut(normalizedShortcut)) {
       continue;
     }
+    if (isFnShortcut(normalizedShortcut)) {
+      continue;
+    }
     try {
       const success = globalShortcut.register(normalizedShortcut, async () => {
         await runCommandById(commandId, 'hotkey');
@@ -5320,6 +6018,7 @@ function registerCommandHotkeys(hotkeys: Record<string, string>): void {
   }
 
   syncFnSpeakToggleWatcher(hotkeys);
+  syncFnCommandWatchers(hotkeys);
 }
 
 // ─── App Initialization ─────────────────────────────────────────────
@@ -5394,6 +6093,12 @@ app.whenReady().then(async () => {
         submenu: [
           { role: 'about' },
           { type: 'separator' },
+          {
+            label: 'Preferences...',
+            accelerator: 'Cmd+,',
+            click: () => openSettingsWindow(),
+          },
+          { type: 'separator' },
           { role: 'hide' },
           { role: 'hideOthers' },
           { role: 'unhide' },
@@ -5415,10 +6120,13 @@ app.whenReady().then(async () => {
       },
     ])
   );
+  ensureAppTray();
 
   const settings = loadSettings();
   applyOpenAtLogin(Boolean((settings as any).openAtLogin));
   ensureAppUpdaterConfigured();
+  // Daily background update check (once every 24h).
+  void runBackgroundAppUpdaterCheck();
 
   // Start clipboard monitor only after onboarding is complete.
   // On macOS Sonoma+, reading the clipboard at startup can trigger an
@@ -5449,7 +6157,11 @@ app.whenReady().then(async () => {
     const commands = await getAvailableCommands();
     const disabled = new Set(s.disabledCommands || []);
     const enabled = new Set((s as any).enabledCommands || []);
+    const aiDisabled = isAIDisabledInSettings(s);
     return commands.filter((c: any) => {
+      const commandId = String(c?.id || '');
+      if (aiDisabled && isAIDependentSystemCommand(commandId)) return false;
+      if (isAISectionDisabledForCommand(commandId, s)) return false;
       if (disabled.has(c.id)) return false;
       if (c?.disabledByDefault && !enabled.has(c.id)) return false;
       return true;
@@ -5549,6 +6261,8 @@ app.whenReady().then(async () => {
     'speak-preview-voice',
     async (_event: any, payload?: { voice: string; text?: string; rate?: string; provider?: 'edge-tts' | 'elevenlabs'; model?: string }) => {
       const settings = loadSettings();
+      if (isAIDisabledInSettings(settings)) return false;
+      if (settings.ai?.readEnabled === false) return false;
       const provider = payload?.provider || (String(settings.ai?.textToSpeechModel || '').startsWith('elevenlabs-') ? 'elevenlabs' : 'edge-tts');
       const voice = String(payload?.voice || speakRuntimeOptions.voice || 'en-US-EricNeural').trim();
       const rate = parseSpeakRateInput(payload?.rate ?? speakRuntimeOptions.rate);
@@ -5686,10 +6400,71 @@ app.whenReady().then(async () => {
     return restartAndInstallAppUpdate();
   });
 
+  // Full update flow: check → download → restart
+  ipcMain.handle('app-updater-check-and-install', async () => {
+    ensureAppUpdaterConfigured();
+    if (!appUpdater) {
+      void showMemoryStatusBar('error', 'Updater not available.');
+      return { success: false, error: 'Updater not available' };
+    }
+
+    try {
+      // Step 1: Check for updates
+      void showMemoryStatusBar('processing', 'Checking for updates...');
+      const checkStatus = await checkForAppUpdates();
+      if (checkStatus.state === 'not-available') {
+        void showMemoryStatusBar('success', 'Already on latest version.');
+        return { success: true, message: 'Already on latest version', state: checkStatus.state };
+      }
+      if (checkStatus.state === 'error') {
+        void showMemoryStatusBar('error', checkStatus.message || 'Failed to check for updates');
+        return { success: false, error: checkStatus.message || 'Failed to check for updates' };
+      }
+
+      // Step 2: Download if available
+      if (checkStatus.state === 'available') {
+        void showMemoryStatusBar('processing', 'Downloading update...');
+        const downloadStatus = await downloadAppUpdate();
+        if (downloadStatus.state === 'error') {
+          void showMemoryStatusBar('error', downloadStatus.message || 'Failed to download update');
+          return { success: false, error: downloadStatus.message || 'Failed to download update' };
+        }
+      }
+
+      // Step 3: Restart if downloaded
+      if (appUpdaterStatusSnapshot.state === 'downloaded') {
+        void showMemoryStatusBar('processing', 'Restarting to install update...');
+        const installed = restartAndInstallAppUpdate();
+        if (installed) {
+          return { success: true, message: 'Restarting to install update...', state: 'restarting' };
+        }
+        void showMemoryStatusBar('error', 'Failed to restart for update installation');
+        return { success: false, error: 'Failed to restart for update installation' };
+      }
+
+      void showMemoryStatusBar('success', checkStatus.message || 'Update check complete');
+      return { success: true, message: checkStatus.message || 'Update check complete', state: checkStatus.state };
+    } catch (error: any) {
+      void showMemoryStatusBar('error', String(error?.message || error || 'Update flow failed'));
+      return { success: false, error: String(error?.message || error || 'Update flow failed') };
+    }
+  });
+
   ipcMain.handle(
     'save-settings',
     async (_event: any, patch: Partial<AppSettings>) => {
       const result = saveSettings(patch);
+      const windowsToNotify = [mainWindow, settingsWindow, extensionStoreWindow, promptWindow]
+        .filter(Boolean) as Array<InstanceType<typeof BrowserWindow>>;
+      for (const win of windowsToNotify) {
+        if (win.isDestroyed()) continue;
+        try {
+          win.webContents.send('settings-updated', result);
+        } catch {}
+      }
+      if (patch.commandAliases !== undefined) {
+        invalidateCache();
+      }
       if (patch.customExtensionFolders !== undefined) {
         invalidateCache();
         try {
@@ -5701,6 +6476,15 @@ app.whenReady().then(async () => {
       if (patch.openAtLogin !== undefined) {
         applyOpenAtLogin(Boolean(patch.openAtLogin));
       }
+      // Hyper runtime wiring is temporarily disabled.
+      // if (patch.hyperKeyIncludeShift !== undefined) {
+      //   try {
+      //     registerGlobalShortcut(result.globalShortcut);
+      //   } catch {}
+      //   try {
+      //     registerCommandHotkeys(result.commandHotkeys);
+      //   } catch {}
+      // }
       // When onboarding completes: hide dock, then start services that were
       // deferred to avoid triggering permission dialogs during onboarding.
       if (patch.hasSeenOnboarding === true) {
@@ -5710,6 +6494,24 @@ app.whenReady().then(async () => {
         }
         startClipboardMonitor();
         syncFnSpeakToggleWatcher(loadSettings().commandHotkeys);
+        syncFnCommandWatchers(loadSettings().commandHotkeys);
+      }
+      const aiEnabledPatch = patch.ai?.enabled;
+      if (aiEnabledPatch === false) {
+        stopSpeakSession({ resetStatus: true, cleanupWindow: true });
+        mainWindow?.webContents.send('whisper-stop-listening');
+        mainWindow?.webContents.send('whisper-stop-and-close');
+        whisperHoldRequestSeq += 1;
+        stopWhisperHoldWatcher();
+        stopFnSpeakToggleWatcher();
+        if (nativeSpeechProcess) {
+          try { nativeSpeechProcess.kill('SIGTERM'); } catch {}
+          nativeSpeechProcess = null;
+          nativeSpeechStdoutBuffer = '';
+        }
+      } else if (aiEnabledPatch === true) {
+        syncFnSpeakToggleWatcher(loadSettings().commandHotkeys);
+        syncFnCommandWatchers(loadSettings().commandHotkeys);
       }
       return result;
     }
@@ -5783,11 +6585,13 @@ app.whenReady().then(async () => {
   ipcMain.handle('enable-fn-watcher-for-onboarding', () => {
     fnWatcherOnboardingOverride = true;
     syncFnSpeakToggleWatcher(loadSettings().commandHotkeys);
+    syncFnCommandWatchers(loadSettings().commandHotkeys);
   });
   ipcMain.handle('disable-fn-watcher-for-onboarding', () => {
     fnWatcherOnboardingOverride = false;
     if (!loadSettings().hasSeenOnboarding) {
       stopFnSpeakToggleWatcher();
+      stopAllFnCommandWatchers();
     }
   });
 
@@ -5812,24 +6616,32 @@ app.whenReady().then(async () => {
         for (const [otherCommandId, otherHotkey] of Object.entries(hotkeys)) {
           if (otherCommandId === commandId) continue;
           if (normalizeAccelerator(otherHotkey) === normalizedHotkey) {
-            return { success: false, error: 'duplicate' as const };
+            return { success: false, error: 'duplicate' as const, conflictCommandId: otherCommandId };
           }
         }
 
         const isFnSpeakToggle =
           commandId === 'system-supercmd-whisper-speak-toggle' &&
           isFnOnlyShortcut(normalizedHotkey);
+        const isFnHotkey = isFnShortcut(normalizedHotkey);
 
         // Register the new one
         try {
-          const success = isFnSpeakToggle
-            ? true
-            : globalShortcut.register(normalizedHotkey, async () => {
-                await runCommandById(commandId, 'hotkey');
-              });
+          let success = false;
+          if (isFnSpeakToggle) {
+            success = true;
+          } else if (isFnHotkey) {
+            const fnConfig = parseHoldShortcutConfig(normalizedHotkey);
+            const binaryPath = ensureWhisperHoldWatcherBinary();
+            success = Boolean(fnConfig && fnConfig.fn && binaryPath);
+          } else {
+            success = globalShortcut.register(normalizedHotkey, async () => {
+              await runCommandById(commandId, 'hotkey');
+            });
+          }
           if (!success) {
             // Attempt to restore old mapping if the new one failed.
-            if (oldHotkey) {
+            if (oldHotkey && !isFnHotkey) {
               const normalizedOldHotkey = normalizeAccelerator(oldHotkey);
               try {
                 const restored = globalShortcut.register(normalizedOldHotkey, async () => {
@@ -5843,7 +6655,7 @@ app.whenReady().then(async () => {
             return { success: false, error: 'unavailable' as const };
           }
           hotkeys[commandId] = hotkey;
-          if (!isFnSpeakToggle) {
+          if (!isFnSpeakToggle && !isFnHotkey) {
             registeredHotkeys.set(normalizedHotkey, commandId);
           }
         } catch {
@@ -5855,6 +6667,7 @@ app.whenReady().then(async () => {
 
       saveSettings({ commandHotkeys: hotkeys });
       syncFnSpeakToggleWatcher(hotkeys);
+      syncFnCommandWatchers(hotkeys);
       return { success: true as const };
     }
   );
@@ -6950,7 +7763,11 @@ return appURL's |path|() as text`,
 
   // Get system appearance
   ipcMain.handle('get-appearance', () => {
-    return 'dark';
+    try {
+      return electron.nativeTheme?.shouldUseDarkColors ? 'dark' : 'light';
+    } catch {
+      return 'dark';
+    }
   });
 
   // SQLite query execution (for extensions like cursor-recent-projects)
@@ -7165,13 +7982,22 @@ return appURL's |path|() as text`,
     ) => {
       const text = String(payload?.text || '').trim();
       if (!text) {
+        void showMemoryStatusBar('error', 'No selected text found.');
         return { success: false, error: 'No selected text found.' };
       }
+      void showMemoryStatusBar('processing', 'Adding to memory...');
       return await addMemory(loadSettings(), {
         text,
         userId: payload?.userId,
         source: payload?.source || 'launcher-selection',
         metadata: payload?.metadata,
+      }).then((result) => {
+        if (result?.success) {
+          void showMemoryStatusBar('success', 'Added to memory.');
+        } else {
+          void showMemoryStatusBar('error', result?.error || 'Failed to add to memory.');
+        }
+        return result;
       });
     }
   );
@@ -7383,6 +8209,10 @@ return appURL's |path|() as text`,
     'ai-ask',
     async (event: any, requestId: string, prompt: string, options?: { model?: string; creativity?: number; systemPrompt?: string }) => {
       const s = loadSettings();
+      if (s.ai?.llmEnabled === false) {
+        event.sender.send('ai-stream-error', { requestId, error: 'LLM is disabled in Settings → AI.' });
+        return;
+      }
       if (!isAIAvailable(s.ai)) {
         event.sender.send('ai-stream-error', { requestId, error: 'AI is not configured. Please set up an API key in Settings → AI.' });
         return;
@@ -7437,10 +8267,15 @@ return appURL's |path|() as text`,
 
   ipcMain.handle('ai-is-available', () => {
     const s = loadSettings();
+    if (s.ai?.llmEnabled === false) return false;
     return isAIAvailable(s.ai);
   });
 
   ipcMain.handle('whisper-refine-transcript', async (_event: any, transcript: string) => {
+    const s = loadSettings();
+    if (isAIDisabledInSettings(s) || s.ai?.llmEnabled === false || s.ai?.whisperEnabled === false) {
+      return { correctedText: String(transcript || ''), source: 'raw' as const };
+    }
     return await refineWhisperTranscript(transcript);
   });
 
@@ -7448,6 +8283,12 @@ return appURL's |path|() as text`,
     'whisper-transcribe',
     async (_event: any, audioArrayBuffer: ArrayBuffer, options?: { language?: string; mimeType?: string }) => {
       const s = loadSettings();
+      if (isAIDisabledInSettings(s)) {
+        throw new Error('AI is disabled. Enable AI in Settings -> AI to use Whisper.');
+      }
+      if (s.ai?.whisperEnabled === false) {
+        throw new Error('SuperCmd Whisper is disabled in Settings -> AI.');
+      }
 
       // Parse speechToTextModel to a concrete provider model.
       let provider: 'openai' | 'elevenlabs' = 'openai';
@@ -7519,6 +8360,9 @@ return appURL's |path|() as text`,
         singleUtterance?: boolean;
       }
     ) => {
+    if (isAIDisabledInSettings()) {
+      throw new Error('AI is disabled. Enable AI in Settings -> AI to use Whisper.');
+    }
     // Kill any existing process
     if (nativeSpeechProcess) {
       try { nativeSpeechProcess.kill('SIGTERM'); } catch {}
@@ -8421,11 +9265,17 @@ app.on('window-all-closed', () => {
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
+  clearAppUpdaterAutoCheckTimer();
   stopWhisperHoldWatcher();
   stopFnSpeakToggleWatcher();
+  stopAllFnCommandWatchers();
   stopSpeakSession({ resetStatus: false });
   stopClipboardMonitor();
   stopSnippetExpander();
+  if (appTray) {
+    try { appTray.destroy(); } catch {}
+    appTray = null;
+  }
   // Clean up trays
   for (const [, tray] of menuBarTrays) {
     tray.destroy();

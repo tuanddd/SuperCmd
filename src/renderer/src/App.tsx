@@ -7,7 +7,7 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Sparkles, ArrowRight, Loader2 } from 'lucide-react';
+import { X, Sparkles, ArrowRight } from 'lucide-react';
 import type { CommandInfo, ExtensionBundle, AppSettings } from '../types/electron';
 import ExtensionView from './ExtensionView';
 import ClipboardManager from './ClipboardManager';
@@ -26,6 +26,7 @@ import { useBackgroundRefresh } from './hooks/useBackgroundRefresh';
 import { useSpeakManager } from './hooks/useSpeakManager';
 import { useWhisperManager } from './hooks/useWhisperManager';
 import { LAST_EXT_KEY, MAX_RECENT_COMMANDS } from './utils/constants';
+import { applyBaseColor } from './utils/base-color';
 import { resetAccessToken } from './raycast-api';
 import {
   type LauncherAction, type MemoryFeedback,
@@ -41,6 +42,9 @@ import {
   shouldOpenCommandSetup,
   getMissingRequiredScriptArguments, toScriptArgumentMapFromArray,
 } from './utils/extension-preferences';
+import { applyAppFontSize, getDefaultAppFontSize } from './utils/font-size';
+import { refreshThemeFromStorage } from './utils/theme';
+import { applyUiStyle } from './utils/ui-style';
 import ScriptCommandSetupView from './views/ScriptCommandSetupView';
 import ScriptCommandOutputView from './views/ScriptCommandOutputView';
 import ExtensionPreferenceSetupView from './views/ExtensionPreferenceSetupView';
@@ -51,6 +55,7 @@ const STALE_OVERLAY_RESET_MS = 60_000;
 
 const App: React.FC = () => {
   const [commands, setCommands] = useState<CommandInfo[]>([]);
+  const [commandAliases, setCommandAliases] = useState<Record<string, string>>({});
   const [pinnedCommands, setPinnedCommands] = useState<string[]>([]);
   const [recentCommands, setRecentCommands] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -196,11 +201,23 @@ const App: React.FC = () => {
       const shortcutStatus = await window.electron.getGlobalShortcutStatus();
       setPinnedCommands(settings.pinnedCommands || []);
       setRecentCommands(settings.recentCommands || []);
+      setCommandAliases(
+        Object.entries(settings.commandAliases || {}).reduce((acc, [commandId, alias]) => {
+          const normalizedCommandId = String(commandId || '').trim();
+          const normalizedAlias = String(alias || '').trim();
+          if (!normalizedCommandId || !normalizedAlias) return acc;
+          acc[normalizedCommandId] = normalizedAlias;
+          return acc;
+        }, {} as Record<string, string>)
+      );
       setLauncherShortcut(settings.globalShortcut || 'Alt+Space');
       const speakToggleHotkey = settings.commandHotkeys?.['system-supercmd-whisper-speak-toggle'] || 'Fn';
       setWhisperSpeakToggleLabel(formatShortcutLabel(speakToggleHotkey));
       setConfiguredEdgeTtsVoice(String(settings.ai?.edgeTtsVoice || 'en-US-EricNeural'));
       setConfiguredTtsModel(String(settings.ai?.textToSpeechModel || 'edge-tts'));
+      applyAppFontSize(settings.fontSize);
+      applyUiStyle(settings.uiStyle || 'default');
+      applyBaseColor(settings.baseColor || '#101113');
       const shouldShowOnboarding = !settings.hasSeenOnboarding;
       setShowOnboarding(shouldShowOnboarding);
       setOnboardingRequiresShortcutFix(shouldShowOnboarding && !shortcutStatus.ok);
@@ -208,9 +225,13 @@ const App: React.FC = () => {
       console.error('Failed to load launcher preferences:', e);
       setPinnedCommands([]);
       setRecentCommands([]);
+      setCommandAliases({});
       setLauncherShortcut('Alt+Space');
       setConfiguredEdgeTtsVoice('en-US-EricNeural');
       setConfiguredTtsModel('edge-tts');
+      applyAppFontSize(getDefaultAppFontSize());
+      applyUiStyle('default');
+      applyBaseColor('#101113');
       setShowOnboarding(false);
       setOnboardingRequiresShortcutFix(false);
     }
@@ -284,6 +305,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const cleanupWindowShown = window.electron.onWindowShown((payload) => {
+      refreshThemeFromStorage(false);
       console.log('[WINDOW-SHOWN] fired', payload);
       const isWhisperMode = payload?.mode === 'whisper';
       const isSpeakMode = payload?.mode === 'speak';
@@ -410,6 +432,16 @@ const App: React.FC = () => {
       setSelectedTextSnapshot(String(payload?.selectedTextSnapshot || '').trim());
     });
     return cleanupSelectionSnapshotUpdated;
+  }, []);
+
+  useEffect(() => {
+    const cleanup = window.electron.onSettingsUpdated?.((settings: AppSettings) => {
+      applyAppFontSize(settings.fontSize);
+      applyUiStyle(settings.uiStyle || 'default');
+      applyBaseColor(settings.baseColor || '#101113');
+      setLauncherShortcut(settings.globalShortcut || 'Alt+Space');
+    });
+    return cleanup;
   }, []);
 
   // Listen for OAuth logout events from the settings window.
@@ -758,9 +790,17 @@ const App: React.FC = () => {
   // When calculator is showing but no commands match, show unfiltered list below
   const sourceCommands =
     calcResult && filteredCommands.length === 0 ? contextualCommands : filteredCommands;
+  const hiddenListOnlyCommandIds = useMemo(
+    () => new Set(['system-add-to-memory', 'system-cursor-prompt']),
+    []
+  );
+  const visibleSourceCommands = useMemo(
+    () => sourceCommands.filter((cmd) => !hiddenListOnlyCommandIds.has(cmd.id)),
+    [sourceCommands, hiddenListOnlyCommandIds]
+  );
 
   const groupedCommands = useMemo(() => {
-    const sourceMap = new Map(sourceCommands.map((cmd) => [cmd.id, cmd]));
+    const sourceMap = new Map(visibleSourceCommands.map((cmd) => [cmd.id, cmd]));
     const hasSelection = selectedTextSnapshot.trim().length > 0;
     const contextual = hasSelection
       ? (sourceMap.get('system-add-to-memory') ? [sourceMap.get('system-add-to-memory') as CommandInfo] : [])
@@ -782,12 +822,12 @@ const App: React.FC = () => {
       );
     const recentSet = new Set(recent.map((c) => c.id));
 
-    const other = sourceCommands.filter(
+    const other = visibleSourceCommands.filter(
       (c) => !pinnedSet.has(c.id) && !recentSet.has(c.id) && !contextualIds.has(c.id)
     );
 
     return { contextual, pinned, recent, other };
-  }, [sourceCommands, pinnedCommands, recentCommands, selectedTextSnapshot]);
+  }, [visibleSourceCommands, pinnedCommands, recentCommands, selectedTextSnapshot]);
 
   const displayCommands = useMemo(
     () => [
@@ -860,6 +900,22 @@ const App: React.FC = () => {
     [selectedCommand, movePinnedCommand]
   );
 
+  const moveSelection = useCallback(
+    (direction: 'up' | 'down', options: { wrap?: boolean } = {}) => {
+      const { wrap = false } = options;
+      setSelectedIndex((prev) => {
+        const max = Math.max(0, displayCommands.length + calcOffset - 1);
+        if (direction === 'down') {
+          if (prev < max) return prev + 1;
+          return wrap ? 0 : max;
+        }
+        if (prev > 0) return prev - 1;
+        return wrap ? max : 0;
+      });
+    },
+    [displayCommands.length, calcOffset]
+  );
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.metaKey && (e.key === 'k' || e.key === 'K') && !e.repeat) {
@@ -868,6 +924,20 @@ const App: React.FC = () => {
         setContextMenu(null);
         return;
       }
+
+      if (e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+        if (e.key === 'j' || e.key === 'J') {
+          e.preventDefault();
+          moveSelection('down');
+          return;
+        }
+        if (e.key === 'k' || e.key === 'K') {
+          e.preventDefault();
+          moveSelection('up');
+          return;
+        }
+      }
+
       if (showActions || contextMenu) {
         if (e.key === 'Escape') {
           e.preventDefault();
@@ -915,15 +985,12 @@ const App: React.FC = () => {
 
         case 'ArrowDown':
           e.preventDefault();
-          setSelectedIndex((prev) => {
-            const max = displayCommands.length + calcOffset - 1;
-            return prev < max ? prev + 1 : prev;
-          });
+          moveSelection('down');
           break;
 
         case 'ArrowUp':
           e.preventDefault();
-          setSelectedIndex((prev) => (prev > 0 ? prev - 1 : 0));
+          moveSelection('up');
           break;
 
         case 'Enter':
@@ -953,6 +1020,7 @@ const App: React.FC = () => {
       }
     },
     [
+      moveSelection,
       displayCommands,
       selectedIndex,
       searchQuery,
@@ -971,6 +1039,14 @@ const App: React.FC = () => {
   );
 
   const runLocalSystemCommand = useCallback(async (commandId: string): Promise<boolean> => {
+    if (commandId === 'system-supercmd-whisper' || commandId === 'system-supercmd-speak') {
+      try {
+        const settings = await window.electron.getSettings();
+        if (settings.ai?.enabled === false) {
+          return true;
+        }
+      } catch {}
+    }
     if (commandId === 'system-open-onboarding') {
       await window.electron.setLauncherMode('onboarding');
       whisperSessionRef.current = false;
@@ -1007,11 +1083,12 @@ const App: React.FC = () => {
       if (memoryActionLoading) return true;
       setMemoryActionLoading(true);
       setMemoryFeedback(null);
-      const selectedText = String(await window.electron.getSelectedTextStrict() || '').trim();
+      const selectedText = String(
+        await window.electron.getSelectedTextStrict() || selectedTextSnapshot || ''
+      ).trim();
       if (!selectedText) {
         setSelectedTextSnapshot('');
         setMemoryActionLoading(false);
-        showMemoryFeedback('error', 'No selected text found.');
         return true;
       }
       try {
@@ -1021,13 +1098,11 @@ const App: React.FC = () => {
         });
         if (!result.success) {
           console.error('[Supermemory] Failed to add memory:', result.error || 'Unknown error');
-          showMemoryFeedback('error', result.error || 'Failed to add to memory.');
           return true;
         }
         setSelectedTextSnapshot('');
         setSearchQuery('');
         setSelectedIndex(0);
-        showMemoryFeedback('success', 'Added selected text to memory.');
       } finally {
         setMemoryActionLoading(false);
       }
@@ -1069,8 +1144,12 @@ const App: React.FC = () => {
       await window.electron.snippetExport();
       return true;
     }
+    if (commandId === 'system-check-for-updates') {
+      await window.electron.appUpdaterCheckAndInstall();
+      return true;
+    }
     return false;
-  }, [memoryActionLoading, showMemoryFeedback, showOnboarding, openOnboarding, openWhisper, setShowWhisper, setShowWhisperOnboarding, setShowWhisperHint, openClipboardManager, openSnippetManager, openFileSearch, openSpeak, setShowSpeak]);
+  }, [memoryActionLoading, selectedTextSnapshot, showMemoryFeedback, showOnboarding, openOnboarding, openWhisper, setShowWhisper, setShowWhisperOnboarding, setShowWhisperHint, openClipboardManager, openSnippetManager, openFileSearch, openSpeak, setShowSpeak]);
 
   useEffect(() => {
     const cleanup = window.electron.onRunSystemCommand(async (commandId: string) => {
@@ -1750,13 +1829,16 @@ const App: React.FC = () => {
   }
 
   // ─── Launcher mode ──────────────────────────────────────────────
+  const isGlassyTheme =
+    document.documentElement.classList.contains('sc-glassy') ||
+    document.body.classList.contains('sc-glassy');
   return (
     <>
     {alwaysMountedRunners}
     <div className="w-full h-full">
-      <div className="glass-effect overflow-hidden h-full flex flex-col">
+      <div className="glass-effect overflow-hidden h-full flex flex-col relative">
         {/* Search header - transparent background */}
-        <div className="flex items-center gap-3 px-5 py-3.5 border-b border-white/[0.06]">
+        <div className="flex items-center gap-3 px-5 py-3.5 border-b border-[var(--ui-divider)]">
           <input
             ref={inputRef}
             type="text"
@@ -1764,23 +1846,23 @@ const App: React.FC = () => {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             onKeyDown={handleKeyDown}
-            className="flex-1 bg-transparent border-none outline-none text-white/95 placeholder-white/45 text-[15px] font-medium tracking-[0.005em]"
+            className="flex-1 bg-transparent border-none outline-none text-[var(--text-primary)] placeholder:text-[color:var(--text-muted)] placeholder:font-medium text-[15px] font-medium tracking-[0.005em]"
             autoFocus
           />
           {searchQuery && aiAvailable && (
             <button
               onClick={() => startAiChat(searchQuery)}
-              className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-white/[0.06] hover:bg-white/[0.10] transition-colors flex-shrink-0 group"
+              className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-[var(--soft-pill-bg)] hover:bg-[var(--soft-pill-hover-bg)] transition-colors flex-shrink-0 group"
             >
               <Sparkles className="w-3 h-3 text-white/30 group-hover:text-purple-400 transition-colors" />
               <span className="text-[11px] text-white/30 group-hover:text-white/50 transition-colors">Ask AI</span>
-              <kbd className="text-[10px] text-white/20 bg-white/[0.06] px-1 py-0.5 rounded font-mono leading-none">Tab</kbd>
+              <kbd className="text-[10px] text-white/20 bg-[var(--soft-pill-bg)] px-1 py-0.5 rounded font-mono leading-none">Tab</kbd>
             </button>
           )}
           {searchQuery && (
             <button
               onClick={() => setSearchQuery('')}
-              className="text-white/30 hover:text-white/60 transition-colors flex-shrink-0"
+              className="text-[var(--text-subtle)] hover:text-[var(--text-muted)] transition-colors flex-shrink-0"
             >
               <X className="w-4 h-4" />
             </button>
@@ -1793,11 +1875,11 @@ const App: React.FC = () => {
           className="flex-1 overflow-y-auto custom-scrollbar p-1.5 list-area"
         >
           {isLoading ? (
-            <div className="flex items-center justify-center h-full text-white/50">
+            <div className="flex items-center justify-center h-full text-[var(--text-muted)]">
               <p className="text-sm">Discovering apps...</p>
             </div>
           ) : displayCommands.length === 0 && !calcResult ? (
-            <div className="flex items-center justify-center h-full text-white/50">
+            <div className="flex items-center justify-center h-full text-[var(--text-muted)]">
               <p className="text-sm">No matching results</p>
             </div>
           ) : (
@@ -1808,8 +1890,8 @@ const App: React.FC = () => {
                   ref={(el) => (itemRefs.current[0] = el)}
                   className={`mx-1 mt-0.5 mb-2 px-6 py-4 rounded-xl cursor-pointer transition-colors border ${
                     selectedIndex === 0
-                      ? 'bg-white/[0.08] border-white/[0.12]'
-                      : 'bg-white/[0.03] border-white/[0.06] hover:bg-white/[0.05]'
+                      ? 'bg-[var(--launcher-card-selected-bg)] border-transparent'
+                      : 'bg-[var(--launcher-card-bg)] border-[var(--launcher-card-border)] hover:bg-[var(--launcher-card-hover-bg)]'
                   }`}
                   onClick={() => {
                     navigator.clipboard.writeText(calcResult.result);
@@ -1824,7 +1906,7 @@ const App: React.FC = () => {
                     </div>
                     <ArrowRight className="w-5 h-5 text-white/25 flex-shrink-0" />
                     <div className="text-center">
-                      <div className="text-white text-xl font-semibold">{calcResult.result}</div>
+                      <div className="text-white text-xl font-medium">{calcResult.result}</div>
                       <div className="text-white/35 text-xs mt-1">{calcResult.resultLabel}</div>
                     </div>
                   </div>
@@ -1845,7 +1927,7 @@ const App: React.FC = () => {
                     acc.nodes.push(
                       <div
                         key={`section-${section.title}`}
-                        className="px-3 pt-2 pb-1 text-[11px] uppercase tracking-wider text-white/50 font-semibold"
+                        className="px-3 pt-2 pb-1 text-[11px] uppercase tracking-wider text-[var(--text-subtle)] font-medium"
                       >
                         {section.title}
                       </div>
@@ -1854,6 +1936,11 @@ const App: React.FC = () => {
                       const flatIndex = startIndex + i;
                       const accessoryLabel = getCommandAccessoryLabel(command);
                       const fallbackCategory = getCategoryLabel(command.category);
+                      const commandAlias = String(commandAliases[command.id] || '').trim();
+                      const aliasMatchesSearch =
+                        Boolean(commandAlias) &&
+                        Boolean(searchQuery.trim()) &&
+                        commandAlias.toLowerCase().includes(searchQuery.trim().toLowerCase());
                       acc.nodes.push(
                         <div
                           key={command.id}
@@ -1880,18 +1967,23 @@ const App: React.FC = () => {
                             </div>
 
                             <div className="min-w-0 flex-1 flex items-center gap-2">
-                              <div className="text-white/95 text-[13px] font-semibold truncate tracking-[0.004em]">
+                              <div className="text-[var(--text-primary)] text-[13px] font-medium truncate tracking-[0.004em]">
                                 {getCommandDisplayTitle(command)}
                               </div>
                               {accessoryLabel ? (
-                                <div className="text-white/60 text-[12px] font-medium truncate">
+                                <div className="text-[var(--text-muted)] text-[12px] font-medium truncate">
                                   {accessoryLabel}
                                 </div>
                               ) : (
-                                <div className="text-white/50 text-[11px] font-medium truncate">
+                                <div className="text-[var(--text-muted)] text-[11px] font-medium truncate">
                                   {fallbackCategory}
                                 </div>
                               )}
+                              {aliasMatchesSearch ? (
+                                <div className="inline-flex items-center h-5 rounded-md border border-[var(--launcher-chip-border)] bg-[var(--launcher-chip-bg)] px-1.5 text-[10px] font-mono text-[var(--text-subtle)] leading-none flex-shrink-0">
+                                  {commandAlias}
+                                </div>
+                              ) : null}
                             </div>
                           </div>
                         </div>
@@ -1909,48 +2001,32 @@ const App: React.FC = () => {
         {/* Footer actions */}
         {!isLoading && (
           <div
-            className="flex items-center px-4 py-3.5 border-t border-white/[0.06]"
-            style={{ background: 'rgba(28,28,32,0.90)' }}
+            className="sc-glass-footer sc-launcher-footer absolute bottom-0 left-0 right-0 z-10 flex items-center px-4 py-2.5"
           >
             <div
-              className={`flex items-center gap-2 text-xs flex-1 min-w-0 font-medium truncate ${
-                memoryActionLoading
-                  ? 'text-white/60'
-                  : memoryFeedback
-                  ? memoryFeedback.type === 'success'
-                    ? 'text-emerald-300'
-                    : 'text-red-300'
-                  : 'text-white/50'
-              }`}
+              className="flex items-center gap-2 text-xs flex-1 min-w-0 font-normal truncate text-[var(--text-subtle)]"
             >
-              {memoryActionLoading ? (
-                <>
-                  <Loader2 className="w-3.5 h-3.5 animate-spin flex-shrink-0" />
-                  <span>Adding to memory...</span>
-                </>
-              ) : memoryFeedback
-                ? memoryFeedback.text
-                : selectedCommand
-                  ? (
-                    <>
-                      <span className="w-5 h-5 flex items-center justify-center flex-shrink-0 overflow-hidden">
-                        {renderCommandIcon(selectedCommand)}
-                      </span>
-                      <span className="truncate">{getCommandDisplayTitle(selectedCommand)}</span>
-                    </>
-                  )
-                  : `${displayCommands.length} results`}
+              {selectedCommand
+                ? (
+                  <>
+                    <span className="w-5 h-5 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                      {renderCommandIcon(selectedCommand)}
+                    </span>
+                    <span className="truncate">{getCommandDisplayTitle(selectedCommand)}</span>
+                  </>
+                )
+                : `${displayCommands.length} results`}
             </div>
             {selectedActions[0] && (
               <div className="flex items-center gap-2 mr-3">
                 <button
                   onClick={() => selectedActions[0].execute()}
-                  className="text-white text-xs font-semibold hover:text-white/85 transition-colors"
+                  className="text-[var(--text-primary)] text-xs font-semibold hover:text-[var(--text-primary)] transition-colors"
                 >
                   {selectedActions[0].title}
                 </button>
                 {selectedActions[0].shortcut && (
-                  <kbd className="inline-flex items-center justify-center min-w-[22px] h-[22px] px-1.5 rounded bg-white/[0.08] text-[11px] text-white/40 font-medium">
+                  <kbd className="inline-flex items-center justify-center min-w-[22px] h-[22px] px-1.5 rounded bg-[var(--kbd-bg)] text-[11px] text-[var(--text-subtle)] font-medium">
                     {renderShortcutLabel(selectedActions[0].shortcut)}
                   </kbd>
                 )}
@@ -1961,11 +2037,11 @@ const App: React.FC = () => {
                 setContextMenu(null);
                 setShowActions(true);
               }}
-              className="flex items-center gap-1.5 text-white/50 hover:text-white/70 transition-colors"
+              className="flex items-center gap-1.5 text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
             >
-              <span className="text-xs font-medium">Actions</span>
-              <kbd className="inline-flex items-center justify-center min-w-[22px] h-[22px] px-1.5 rounded bg-white/[0.08] text-[11px] text-white/40 font-medium">⌘</kbd>
-              <kbd className="inline-flex items-center justify-center min-w-[22px] h-[22px] px-1.5 rounded bg-white/[0.08] text-[11px] text-white/40 font-medium">K</kbd>
+              <span className="text-xs font-normal">Actions</span>
+              <kbd className="inline-flex items-center justify-center min-w-[22px] h-[22px] px-1.5 rounded bg-[var(--kbd-bg)] text-[11px] text-[var(--text-subtle)] font-medium">⌘</kbd>
+              <kbd className="inline-flex items-center justify-center min-w-[22px] h-[22px] px-1.5 rounded bg-[var(--kbd-bg)] text-[11px] text-[var(--text-subtle)] font-medium">K</kbd>
             </button>
           </div>
         )}
@@ -1975,17 +2051,32 @@ const App: React.FC = () => {
       <div
         className="fixed inset-0 z-50"
         onClick={() => setShowActions(false)}
-        style={{ background: 'rgba(0,0,0,0.15)' }}
+        style={{ background: 'var(--bg-scrim)' }}
       >
         <div
           ref={actionsOverlayRef}
-          className="absolute bottom-12 right-3 w-96 max-h-[65vh] rounded-xl overflow-hidden flex flex-col shadow-2xl outline-none focus:outline-none ring-0 focus:ring-0"
+          className="absolute bottom-12 right-3 w-96 max-h-[65vh] rounded-xl overflow-hidden flex flex-col shadow-2xl outline-none focus:outline-none focus-visible:outline-none ring-0 focus:ring-0 focus-visible:ring-0"
           tabIndex={0}
           onKeyDown={handleActionsOverlayKeyDown}
           style={{
-            background: 'rgba(30,30,34,0.97)',
-            backdropFilter: 'blur(40px)',
-            border: '1px solid rgba(255,255,255,0.08)',
+            ...(isGlassyTheme
+              ? {
+                  background:
+                    'linear-gradient(160deg, rgba(var(--on-surface-rgb), 0.08), rgba(var(--on-surface-rgb), 0.01)), rgba(var(--surface-base-rgb), 0.42)',
+                  backdropFilter: 'blur(96px) saturate(190%)',
+                  WebkitBackdropFilter: 'blur(96px) saturate(190%)',
+                  border: '1px solid rgba(var(--on-surface-rgb), 0.05)',
+                }
+              : {
+                  background: 'var(--card-bg)',
+                  backdropFilter: 'blur(40px)',
+                  WebkitBackdropFilter: 'blur(40px)',
+                  border: '1px solid var(--border-primary)',
+                }),
+            outline: 'none',
+          }}
+          onFocus={(e) => {
+            (e.currentTarget as HTMLDivElement).style.outline = 'none';
           }}
           onClick={(e) => e.stopPropagation()}
         >
@@ -1993,15 +2084,24 @@ const App: React.FC = () => {
             {selectedActions.map((action, idx) => (
               <div
                 key={action.id}
-                className={`mx-1 px-2.5 py-1.5 rounded-lg flex items-center gap-2.5 cursor-pointer transition-colors ${
+                className={`mx-1 px-2.5 py-1.5 rounded-lg border border-transparent flex items-center gap-2.5 cursor-pointer transition-colors ${
                   idx === selectedActionIndex
                     ? action.style === 'destructive'
-                      ? 'bg-white/[0.10] text-red-400'
-                      : 'bg-white/[0.10] text-white'
+                      ? 'bg-white/[0.18] text-red-400'
+                      : 'bg-white/[0.18] text-white'
                     : action.style === 'destructive'
-                      ? 'hover:bg-white/[0.06] text-red-400'
-                      : 'hover:bg-white/[0.06] text-white/80'
+                      ? 'hover:bg-white/[0.08] text-red-400'
+                      : 'hover:bg-white/[0.08] text-white/80'
                 }`}
+                style={
+                  idx === selectedActionIndex
+                    ? {
+                        background: 'var(--action-menu-selected-bg)',
+                        borderColor: 'var(--action-menu-selected-border)',
+                        boxShadow: 'var(--action-menu-selected-shadow)',
+                      }
+                    : undefined
+                }
                 onClick={async () => {
                   await Promise.resolve(action.execute());
                   setShowActions(false);
@@ -2011,7 +2111,7 @@ const App: React.FC = () => {
               >
                 <span className="flex-1 text-sm truncate">{action.title}</span>
                 {action.shortcut && (
-                  <kbd className="inline-flex items-center justify-center min-w-[22px] h-[22px] px-1.5 rounded bg-white/[0.08] text-[11px] font-medium text-white/70">
+                  <kbd className="inline-flex items-center justify-center min-w-[22px] h-[22px] px-1.5 rounded bg-[var(--kbd-bg)] text-[11px] font-medium text-white/70">
                     {renderShortcutLabel(action.shortcut)}
                   </kbd>
                 )}
@@ -2032,15 +2132,30 @@ const App: React.FC = () => {
       >
         <div
           ref={contextMenuRef}
-          className="absolute w-80 max-h-[60vh] rounded-xl overflow-hidden flex flex-col shadow-2xl outline-none focus:outline-none ring-0 focus:ring-0"
+          className="absolute w-80 max-h-[60vh] rounded-xl overflow-hidden flex flex-col shadow-2xl outline-none focus:outline-none focus-visible:outline-none ring-0 focus:ring-0 focus-visible:ring-0"
           tabIndex={0}
           onKeyDown={handleContextMenuKeyDown}
           style={{
             left: Math.min(contextMenu.x, window.innerWidth - 340),
             top: Math.min(contextMenu.y, window.innerHeight - 320),
-            background: 'rgba(30,30,34,0.97)',
-            backdropFilter: 'blur(40px)',
-            border: '1px solid rgba(255,255,255,0.08)',
+            ...(isGlassyTheme
+              ? {
+                  background:
+                    'linear-gradient(160deg, rgba(var(--on-surface-rgb), 0.08), rgba(var(--on-surface-rgb), 0.01)), rgba(var(--surface-base-rgb), 0.42)',
+                  backdropFilter: 'blur(96px) saturate(190%)',
+                  WebkitBackdropFilter: 'blur(96px) saturate(190%)',
+                  border: '1px solid rgba(var(--on-surface-rgb), 0.05)',
+                }
+              : {
+                  background: 'var(--card-bg)',
+                  backdropFilter: 'blur(40px)',
+                  WebkitBackdropFilter: 'blur(40px)',
+                  border: '1px solid var(--border-primary)',
+                }),
+            outline: 'none',
+          }}
+          onFocus={(e) => {
+            (e.currentTarget as HTMLDivElement).style.outline = 'none';
           }}
           onClick={(e) => e.stopPropagation()}
           onContextMenu={(e) => e.preventDefault()}
@@ -2049,15 +2164,24 @@ const App: React.FC = () => {
             {contextActions.map((action, idx) => (
               <div
                 key={`ctx-${action.id}`}
-                className={`mx-1 px-2.5 py-1.5 rounded-lg flex items-center gap-2.5 cursor-pointer transition-colors ${
+                className={`mx-1 px-2.5 py-1.5 rounded-lg border border-transparent flex items-center gap-2.5 cursor-pointer transition-colors ${
                   idx === selectedContextActionIndex
                     ? action.style === 'destructive'
-                      ? 'bg-white/[0.10] text-red-400'
-                      : 'bg-white/[0.10] text-white'
+                      ? 'bg-white/[0.18] text-red-400'
+                      : 'bg-white/[0.18] text-white'
                     : action.style === 'destructive'
-                      ? 'hover:bg-white/[0.06] text-red-400'
-                      : 'hover:bg-white/[0.06] text-white/80'
+                      ? 'hover:bg-white/[0.08] text-red-400'
+                      : 'hover:bg-white/[0.08] text-white/80'
                 }`}
+                style={
+                  idx === selectedContextActionIndex
+                    ? {
+                        background: 'var(--action-menu-selected-bg)',
+                        borderColor: 'var(--action-menu-selected-border)',
+                        boxShadow: 'var(--action-menu-selected-shadow)',
+                      }
+                    : undefined
+                }
                 onClick={async () => {
                   console.log('[CTX-MENU] clicked action:', action.id, action.title);
                   try {
@@ -2073,7 +2197,7 @@ const App: React.FC = () => {
               >
                 <span className="flex-1 text-sm truncate">{action.title}</span>
                 {action.shortcut && (
-                  <kbd className="inline-flex items-center justify-center min-w-[22px] h-[22px] px-1.5 rounded bg-white/[0.08] text-[11px] font-medium text-white/70">
+                  <kbd className="inline-flex items-center justify-center min-w-[22px] h-[22px] px-1.5 rounded bg-[var(--kbd-bg)] text-[11px] font-medium text-white/70">
                     {renderShortcutLabel(action.shortcut)}
                   </kbd>
                 )}

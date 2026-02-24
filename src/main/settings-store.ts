@@ -27,10 +27,16 @@ export interface AISettings {
   edgeTtsVoice: string;
   speechCorrectionEnabled: boolean;
   enabled: boolean;
+  llmEnabled: boolean;
+  whisperEnabled: boolean;
+  readEnabled: boolean;
   openaiCompatibleBaseUrl: string;
   openaiCompatibleApiKey: string;
   openaiCompatibleModel: string;
 }
+
+export type AppFontSize = 'small' | 'medium' | 'large';
+export type AppUiStyle = 'default' | 'glassy';
 
 export interface AppSettings {
   globalShortcut: string;
@@ -39,6 +45,7 @@ export interface AppSettings {
   enabledCommands: string[];
   customExtensionFolders: string[];
   commandHotkeys: Record<string, string>;
+  commandAliases: Record<string, string>;
   pinnedCommands: string[];
   recentCommands: string[];
   hasSeenOnboarding: boolean;
@@ -46,6 +53,36 @@ export interface AppSettings {
   ai: AISettings;
   commandMetadata?: Record<string, { subtitle?: string }>;
   debugMode: boolean;
+  fontSize: AppFontSize;
+  uiStyle: AppUiStyle;
+  baseColor: string;
+  appUpdaterLastCheckedAt: number;
+  hyperKeySource:
+    | 'none'
+    | 'caps-lock'
+    | 'left-command'
+    | 'right-command'
+    | 'left-control'
+    | 'right-control'
+    | 'left-shift'
+    | 'right-shift'
+    | 'left-option'
+    | 'right-option'
+    | 'f1'
+    | 'f2'
+    | 'f3'
+    | 'f4'
+    | 'f5'
+    | 'f6'
+    | 'f7'
+    | 'f8'
+    | 'f9'
+    | 'f10'
+    | 'f11'
+    | 'f12';
+  hyperKeyIncludeShift: boolean;
+  hyperKeyQuickPressAction: 'toggle-caps-lock' | 'escape' | 'none';
+  hyperReplaceModifierGlyphsWithHyper: boolean;
 }
 
 const DEFAULT_AI_SETTINGS: AISettings = {
@@ -66,6 +103,9 @@ const DEFAULT_AI_SETTINGS: AISettings = {
   edgeTtsVoice: 'en-US-EricNeural',
   speechCorrectionEnabled: false,
   enabled: true,
+  llmEnabled: true,
+  whisperEnabled: true,
+  readEnabled: true,
   openaiCompatibleBaseUrl: '',
   openaiCompatibleApiKey: '',
   openaiCompatibleModel: '',
@@ -83,15 +123,91 @@ const DEFAULT_SETTINGS: AppSettings = {
     'system-supercmd-whisper-speak-toggle': 'Fn',
     'system-supercmd-speak': 'Command+Shift+S',
   },
+  commandAliases: {},
   pinnedCommands: [],
   recentCommands: [],
   hasSeenOnboarding: false,
   hasSeenWhisperOnboarding: false,
   ai: { ...DEFAULT_AI_SETTINGS },
   debugMode: false,
+  fontSize: 'medium',
+  uiStyle: 'default',
+  baseColor: '#101113',
+  appUpdaterLastCheckedAt: 0,
+  hyperKeySource: 'none',
+  hyperKeyIncludeShift: true,
+  hyperKeyQuickPressAction: 'toggle-caps-lock',
+  hyperReplaceModifierGlyphsWithHyper: true,
 };
 
 let settingsCache: AppSettings | null = null;
+
+function normalizeFontSize(value: any): AppFontSize {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'small' || normalized === 'large') return normalized;
+  return 'medium';
+}
+
+function normalizeUiStyle(value: any): AppUiStyle {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'glassy') return 'glassy';
+  return 'default';
+}
+
+function normalizeBaseColor(value: any): string {
+  const raw = String(value || '').trim();
+  if (/^#[0-9a-fA-F]{6}$/.test(raw)) return raw.toLowerCase();
+  if (/^#[0-9a-fA-F]{3}$/.test(raw)) {
+    const short = raw.slice(1).split('').map((ch) => `${ch}${ch}`).join('');
+    return `#${short}`.toLowerCase();
+  }
+  return DEFAULT_SETTINGS.baseColor;
+}
+
+function normalizeHyperKeySource(value: any): AppSettings['hyperKeySource'] {
+  const raw = String(value || '').trim().toLowerCase();
+  const map: Record<string, AppSettings['hyperKeySource']> = {
+    'none': 'none',
+    'caps-lock': 'caps-lock',
+    'caps_lock': 'caps-lock',
+    'capslock': 'caps-lock',
+    'left-command': 'left-command',
+    'left-command-key': 'left-command',
+    'right-command': 'right-command',
+    'right-command-key': 'right-command',
+    'left-control': 'left-control',
+    'left-ctrl': 'left-control',
+    'right-control': 'right-control',
+    'right-ctrl': 'right-control',
+    'left-shift': 'left-shift',
+    'right-shift': 'right-shift',
+    'left-option': 'left-option',
+    'left-alt': 'left-option',
+    'right-option': 'right-option',
+    'right-alt': 'right-option',
+    'f1': 'f1',
+    'f2': 'f2',
+    'f3': 'f3',
+    'f4': 'f4',
+    'f5': 'f5',
+    'f6': 'f6',
+    'f7': 'f7',
+    'f8': 'f8',
+    'f9': 'f9',
+    'f10': 'f10',
+    'f11': 'f11',
+    'f12': 'f12',
+  };
+  if (map[raw]) return map[raw];
+  return 'none';
+}
+
+function normalizeHyperKeyQuickPressAction(value: any): 'toggle-caps-lock' | 'escape' | 'none' {
+  const raw = String(value || '').trim().toLowerCase();
+  if (raw === 'escape' || raw === 'esc' || raw === 'trigger-esc' || raw === 'triggers-esc') return 'escape';
+  if (raw === 'none' || raw === 'does-nothing') return 'none';
+  return 'toggle-caps-lock';
+}
 
 function getSettingsPath(): string {
   return path.join(app.getPath('userData'), 'settings.json');
@@ -104,6 +220,7 @@ export function loadSettings(): AppSettings {
     const raw = fs.readFileSync(getSettingsPath(), 'utf-8');
     const parsed = JSON.parse(raw);
     const parsedHotkeys = { ...(parsed.commandHotkeys || {}) };
+    const parsedAliases = { ...(parsed.commandAliases || {}) } as Record<string, any>;
     if (!parsedHotkeys['system-supercmd-whisper-speak-toggle']) {
       if (parsedHotkeys['system-supercmd-whisper-start']) {
         parsedHotkeys['system-supercmd-whisper-speak-toggle'] = parsedHotkeys['system-supercmd-whisper-start'];
@@ -122,19 +239,30 @@ export function loadSettings(): AppSettings {
     delete parsedHotkeys['system-supercmd-whisper-toggle'];
     delete parsedHotkeys['system-supercmd-whisper-start'];
     delete parsedHotkeys['system-supercmd-whisper-stop'];
-      settingsCache = {
-        globalShortcut: parsed.globalShortcut ?? DEFAULT_SETTINGS.globalShortcut,
-        openAtLogin: parsed.openAtLogin ?? DEFAULT_SETTINGS.openAtLogin,
-        disabledCommands: parsed.disabledCommands ?? DEFAULT_SETTINGS.disabledCommands,
-        enabledCommands: parsed.enabledCommands ?? DEFAULT_SETTINGS.enabledCommands,
-        customExtensionFolders: Array.isArray(parsed.customExtensionFolders)
-          ? parsed.customExtensionFolders
-              .map((value: any) => String(value || '').trim())
-              .filter(Boolean)
-          : DEFAULT_SETTINGS.customExtensionFolders,
-        commandHotkeys: {
+    const normalizedAliases: Record<string, string> = {};
+    for (const [commandId, aliasValue] of Object.entries(parsedAliases)) {
+      const normalizedCommandId = String(commandId || '').trim();
+      const normalizedAlias = String(aliasValue || '').trim();
+      if (!normalizedCommandId || !normalizedAlias) continue;
+      normalizedAliases[normalizedCommandId] = normalizedAlias;
+    }
+    settingsCache = {
+      globalShortcut: parsed.globalShortcut ?? DEFAULT_SETTINGS.globalShortcut,
+      openAtLogin: parsed.openAtLogin ?? DEFAULT_SETTINGS.openAtLogin,
+      disabledCommands: parsed.disabledCommands ?? DEFAULT_SETTINGS.disabledCommands,
+      enabledCommands: parsed.enabledCommands ?? DEFAULT_SETTINGS.enabledCommands,
+      customExtensionFolders: Array.isArray(parsed.customExtensionFolders)
+        ? parsed.customExtensionFolders
+            .map((value: any) => String(value || '').trim())
+            .filter(Boolean)
+        : DEFAULT_SETTINGS.customExtensionFolders,
+      commandHotkeys: {
         ...DEFAULT_SETTINGS.commandHotkeys,
         ...parsedHotkeys,
+      },
+      commandAliases: {
+        ...DEFAULT_SETTINGS.commandAliases,
+        ...normalizedAliases,
       },
       pinnedCommands: parsed.pinnedCommands ?? DEFAULT_SETTINGS.pinnedCommands,
       recentCommands: parsed.recentCommands ?? DEFAULT_SETTINGS.recentCommands,
@@ -146,6 +274,17 @@ export function loadSettings(): AppSettings {
       ai: { ...DEFAULT_AI_SETTINGS, ...parsed.ai },
       commandMetadata: parsed.commandMetadata ?? {},
       debugMode: parsed.debugMode ?? DEFAULT_SETTINGS.debugMode,
+      fontSize: normalizeFontSize(parsed.fontSize),
+      uiStyle: normalizeUiStyle(parsed.uiStyle),
+      baseColor: normalizeBaseColor(parsed.baseColor),
+      appUpdaterLastCheckedAt: Number.isFinite(Number(parsed.appUpdaterLastCheckedAt))
+        ? Math.max(0, Number(parsed.appUpdaterLastCheckedAt))
+        : DEFAULT_SETTINGS.appUpdaterLastCheckedAt,
+      hyperKeySource: normalizeHyperKeySource(parsed.hyperKeySource),
+      hyperKeyIncludeShift: parsed.hyperKeyIncludeShift ?? DEFAULT_SETTINGS.hyperKeyIncludeShift,
+      hyperKeyQuickPressAction: normalizeHyperKeyQuickPressAction(parsed.hyperKeyQuickPressAction),
+      hyperReplaceModifierGlyphsWithHyper:
+        parsed.hyperReplaceModifierGlyphsWithHyper ?? DEFAULT_SETTINGS.hyperReplaceModifierGlyphsWithHyper,
     };
   } catch {
     settingsCache = { ...DEFAULT_SETTINGS };

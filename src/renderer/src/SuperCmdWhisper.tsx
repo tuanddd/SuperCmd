@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { formatShortcutForDisplay } from './utils/hyper-key';
 
 interface SuperCmdWhisperProps {
   onClose: () => void;
@@ -31,13 +32,7 @@ const NATIVE_FINAL_DRAIN_TIMEOUT_MS = 3000;
 const PUSH_TO_TALK_MODE = true;
 
 function formatShortcutLabel(shortcut: string): string {
-  return String(shortcut || '')
-    .replace(/Command/g, '\u2318')
-    .replace(/Control/g, '\u2303')
-    .replace(/Alt/g, '\u2325')
-    .replace(/Shift/g, '\u21E7')
-    .replace(/Period/g, '.')
-    .replace(/\+/g, ' ');
+  return formatShortcutForDisplay(shortcut).replace(/ \+ /g, ' ');
 }
 
 function normalizeTranscript(value: string): string {

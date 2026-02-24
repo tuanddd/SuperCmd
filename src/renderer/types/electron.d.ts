@@ -112,6 +112,9 @@ export interface AISettings {
   edgeTtsVoice: string;
   speechCorrectionEnabled: boolean;
   enabled: boolean;
+  llmEnabled: boolean;
+  whisperEnabled: boolean;
+  readEnabled: boolean;
   openaiCompatibleBaseUrl: string;
   openaiCompatibleApiKey: string;
   openaiCompatibleModel: string;
@@ -156,6 +159,7 @@ export interface AppSettings {
   enabledCommands: string[];
   customExtensionFolders: string[];
   commandHotkeys: Record<string, string>;
+  commandAliases: Record<string, string>;
   pinnedCommands: string[];
   recentCommands: string[];
   hasSeenOnboarding: boolean;
@@ -163,6 +167,36 @@ export interface AppSettings {
   ai: AISettings;
   commandMetadata?: Record<string, { subtitle?: string }>;
   debugMode: boolean;
+  fontSize: 'small' | 'medium' | 'large';
+  uiStyle: 'default' | 'glassy';
+  baseColor: string;
+  appUpdaterLastCheckedAt: number;
+  hyperKeySource:
+    | 'none'
+    | 'caps-lock'
+    | 'left-command'
+    | 'right-command'
+    | 'left-control'
+    | 'right-control'
+    | 'left-shift'
+    | 'right-shift'
+    | 'left-option'
+    | 'right-option'
+    | 'f1'
+    | 'f2'
+    | 'f3'
+    | 'f4'
+    | 'f5'
+    | 'f6'
+    | 'f7'
+    | 'f8'
+    | 'f9'
+    | 'f10'
+    | 'f11'
+    | 'f12';
+  hyperKeyIncludeShift: boolean;
+  hyperKeyQuickPressAction: 'toggle-caps-lock' | 'escape' | 'none';
+  hyperReplaceModifierGlyphsWithHyper: boolean;
 }
 
 export interface CatalogEntry {
@@ -281,6 +315,7 @@ export interface ElectronAPI {
   appUpdaterCheckForUpdates: () => Promise<AppUpdaterStatus>;
   appUpdaterDownloadUpdate: () => Promise<AppUpdaterStatus>;
   appUpdaterQuitAndInstall: () => Promise<boolean>;
+  appUpdaterCheckAndInstall: () => Promise<{ success: boolean; error?: string; message?: string; state?: string }>;
   onAppUpdaterStatus: (callback: (status: AppUpdaterStatus) => void) => (() => void);
   saveSettings: (patch: Partial<AppSettings>) => Promise<AppSettings>;
   getAllCommands: () => Promise<CommandInfo[]>;
@@ -303,14 +338,14 @@ export interface ElectronAPI {
   updateCommandHotkey: (
     commandId: string,
     hotkey: string
-  ) => Promise<{ success: boolean; error?: 'duplicate' | 'unavailable' }>;
+  ) => Promise<{ success: boolean; error?: 'duplicate' | 'unavailable'; conflictCommandId?: string }>;
   toggleCommandEnabled: (
     commandId: string,
     enabled: boolean
   ) => Promise<boolean>;
   openSettings: () => Promise<void>;
   openSettingsTab: (
-    tab: 'general' | 'ai' | 'extensions',
+    tab: 'general' | 'ai' | 'extensions' | 'advanced',
     target?: { extensionName?: string; commandName?: string }
   ) => Promise<void>;
   openExtensionStoreWindow: () => Promise<void>;
@@ -320,12 +355,14 @@ export interface ElectronAPI {
       | 'general'
       | 'ai'
       | 'extensions'
+      | 'advanced'
       | {
-          tab: 'general' | 'ai' | 'extensions';
+          tab: 'general' | 'ai' | 'extensions' | 'advanced';
           target?: { extensionName?: string; commandName?: string };
         }
     ) => void
   ) => void;
+  onSettingsUpdated: (callback: (settings: AppSettings) => void) => (() => void);
 
   // Extension Runner
   runExtension: (extName: string, cmdName: string) => Promise<ExtensionBundle | null>;

@@ -5,13 +5,17 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { Settings, Puzzle, Brain } from 'lucide-react';
+import { Settings, Puzzle, Brain, SlidersHorizontal } from 'lucide-react';
 import supercmdLogo from '../../../supercmd.svg';
 import GeneralTab from './settings/GeneralTab';
 import AITab from './settings/AITab';
 import ExtensionsTab from './settings/ExtensionsTab';
+import { applyAppFontSize, getDefaultAppFontSize } from './utils/font-size';
+import { applyBaseColor } from './utils/base-color';
+import { applyUiStyle } from './utils/ui-style';
+import AdvancedTab from './settings/AdvancedTab';
 
-type Tab = 'general' | 'ai' | 'extensions';
+type Tab = 'general' | 'ai' | 'extensions' | 'advanced';
 type SettingsTarget = { extensionName?: string; commandName?: string };
 type SettingsNavigationPayload = { tab: Tab; target?: SettingsTarget };
 
@@ -31,10 +35,15 @@ const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
     label: 'Extensions',
     icon: <Puzzle className="w-4 h-4" />,
   },
+  {
+    id: 'advanced',
+    label: 'Advanced',
+    icon: <SlidersHorizontal className="w-4 h-4" />,
+  },
 ];
 
 function normalizeTab(input: any): Tab | undefined {
-  if (input === 'general' || input === 'ai' || input === 'extensions') return input;
+  if (input === 'general' || input === 'ai' || input === 'extensions' || input === 'advanced') return input;
   return undefined;
 }
 
@@ -98,24 +107,56 @@ const SettingsApp: React.FC = () => {
     });
   }, []);
 
+  useEffect(() => {
+    let disposed = false;
+    window.electron.getSettings()
+      .then((settings) => {
+        if (!disposed) {
+          applyAppFontSize(settings.fontSize);
+          applyUiStyle(settings.uiStyle || 'default');
+          applyBaseColor(settings.baseColor || '#101113');
+        }
+      })
+      .catch(() => {
+        if (!disposed) {
+          applyAppFontSize(getDefaultAppFontSize());
+          applyUiStyle('default');
+        }
+      });
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const cleanup = window.electron.onSettingsUpdated?.((settings) => {
+      applyAppFontSize(settings.fontSize);
+      applyUiStyle(settings.uiStyle || 'default');
+      applyBaseColor(settings.baseColor || '#101113');
+    });
+    return cleanup;
+  }, []);
+
   return (
     <div className="h-screen glass-effect text-white select-none flex flex-col">
       <div className="h-10 drag-region" />
-      <div className="px-6 pb-3 border-b border-white/[0.06]">
+      <div className="px-5 pb-2.5 border-b border-[var(--ui-divider)]">
         <div className="relative flex items-center justify-center">
-          <div className="absolute left-0 text-[13px] font-semibold text-white/90 flex items-center gap-2">
-            <img src={supercmdLogo} alt="" className="w-4 h-4 object-contain" draggable={false} />
+          <div className="absolute left-0 text-[12px] font-semibold text-[var(--text-primary)] flex items-center gap-1.5">
+            <img src={supercmdLogo} alt="" className="w-3.5 h-3.5 object-contain" draggable={false} />
             SuperCmd Settings
           </div>
-          <div className="flex items-center gap-2">
+          <div className="inline-flex items-stretch overflow-hidden rounded-md border border-[var(--ui-divider)] bg-[var(--ui-segment-bg)]">
             {tabs.map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm transition-colors ${
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-[12px] transition-colors ${
+                  tab.id !== tabs[0].id ? 'border-l border-[var(--ui-divider)]' : ''
+                } ${
                   activeTab === tab.id
-                    ? 'bg-white/[0.12] text-white border border-white/[0.14]'
-                    : 'text-white/60 border border-white/[0.08] hover:text-white/85 hover:bg-white/[0.05]'
+                    ? 'bg-[var(--ui-segment-active-bg)] text-[var(--text-primary)]'
+                    : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--ui-segment-hover-bg)]'
                 }`}
               >
                 {tab.icon}
@@ -135,9 +176,10 @@ const SettingsApp: React.FC = () => {
             />
           </div>
         ) : (
-          <div className={activeTab === 'ai' ? 'px-6 pt-2 pb-3' : 'p-6'}>
+          <div className="p-5">
             {activeTab === 'general' && <GeneralTab />}
             {activeTab === 'ai' && <AITab />}
+            {activeTab === 'advanced' && <AdvancedTab />}
           </div>
         )}
       </div>
