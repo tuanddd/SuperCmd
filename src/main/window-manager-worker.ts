@@ -93,6 +93,23 @@ function getWindowsRaw(): any[] {
 function getWindowByIdRaw(windowId: string): any | null {
   const numericId = Number(windowId);
   if (!Number.isFinite(numericId)) return null;
+  const api = getWindowManagerApi();
+  if (api && typeof api.getWindow === 'function') {
+    try {
+      const direct = api.getWindow(numericId);
+      if (direct) {
+        const info = normalizeWindowInfo(direct);
+        if (info?.id === numericId) return direct;
+      }
+    } catch {}
+    try {
+      const direct = api.getWindow(String(Math.trunc(numericId)));
+      if (direct) {
+        const info = normalizeWindowInfo(direct);
+        if (info?.id === numericId) return direct;
+      }
+    } catch {}
+  }
   const windows = getWindowsRaw();
   for (const win of windows) {
     const info = normalizeWindowInfo(win);
@@ -173,12 +190,20 @@ async function handleRequest(request: WorkerRequest): Promise<WorkerResponse> {
         if (![x, y, width, height].every((value) => Number.isFinite(value))) {
           return { id: request.id, ok: false, error: 'invalid bounds' };
         }
-        win.setBounds({
-          x: Math.round(x),
-          y: Math.round(y),
-          width: Math.max(1, Math.round(width)),
-          height: Math.max(1, Math.round(height)),
-        });
+        try {
+          win.setBounds({
+            x: Math.round(x),
+            y: Math.round(y),
+            width: Math.max(1, Math.round(width)),
+            height: Math.max(1, Math.round(height)),
+          });
+        } catch (error) {
+          return {
+            id: request.id,
+            ok: false,
+            error: String((error as any)?.message || error || 'setBounds failed'),
+          };
+        }
         return { id: request.id, ok: true, result: true };
       }
     }

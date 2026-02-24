@@ -1239,6 +1239,27 @@ const WINDOW_MANAGEMENT_PRESET_COMMAND_IDS = new Set<string>([
   'system-window-management-move-left-10',
   'system-window-management-move-right-10',
 ]);
+const WINDOW_MANAGEMENT_FINE_TUNE_COMMAND_IDS = new Set<string>([
+  'system-window-management-increase-size-10',
+  'system-window-management-decrease-size-10',
+  'system-window-management-increase-left-10',
+  'system-window-management-increase-right-10',
+  'system-window-management-increase-top-10',
+  'system-window-management-increase-bottom-10',
+  'system-window-management-decrease-left-10',
+  'system-window-management-decrease-right-10',
+  'system-window-management-decrease-top-10',
+  'system-window-management-decrease-bottom-10',
+  'system-window-management-move-up-10',
+  'system-window-management-move-down-10',
+  'system-window-management-move-left-10',
+  'system-window-management-move-right-10',
+]);
+const WINDOW_MANAGEMENT_FINE_TUNE_RATIO = 0.1;
+const WINDOW_MANAGEMENT_FINE_TUNE_MIN_WIDTH = 120;
+const WINDOW_MANAGEMENT_FINE_TUNE_MIN_HEIGHT = 60;
+const WINDOW_MANAGEMENT_FINE_TUNE_COMMAND_PREFIX = 'system-window-management-';
+let nativeWindowFineTuneSupport: boolean | null = null;
 type QueuedWindowMutation = { id: string; x: number; y: number; width: number; height: number };
 const WINDOW_MANAGEMENT_MUTATION_BATCH_MS = 6;
 const WINDOW_MANAGEMENT_PRESET_HOTKEY_MIN_INTERVAL_MS = 18;
@@ -1251,6 +1272,317 @@ let lastWindowManagementPresetHotkeyAt = 0;
 function isWindowManagementSystemCommand(commandId: string): boolean {
   const normalized = String(commandId || '').trim();
   return normalized === 'system-window-management' || WINDOW_MANAGEMENT_PRESET_COMMAND_IDS.has(normalized);
+}
+
+function isWindowManagementFineTuneCommand(commandId: string): boolean {
+  const normalized = String(commandId || '').trim();
+  return WINDOW_MANAGEMENT_FINE_TUNE_COMMAND_IDS.has(normalized);
+}
+
+function clampWindowManagementFineTuneValue(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  if (max <= min) return min;
+  return Math.max(min, Math.min(max, value));
+}
+
+function normalizeWindowManagementArea(
+  raw: { x?: number; y?: number; width?: number; height?: number } | null | undefined
+): { x: number; y: number; width: number; height: number } | null {
+  const x = Number(raw?.x);
+  const y = Number(raw?.y);
+  const width = Number(raw?.width);
+  const height = Number(raw?.height);
+  if (![x, y, width, height].every((value) => Number.isFinite(value))) return null;
+  return {
+    x: Math.round(x),
+    y: Math.round(y),
+    width: Math.max(1, Math.round(width)),
+    height: Math.max(1, Math.round(height)),
+  };
+}
+
+function getNativeWindowFineTuneAction(commandId: string): string | null {
+  const normalized = String(commandId || '').trim();
+  if (!normalized.startsWith(WINDOW_MANAGEMENT_FINE_TUNE_COMMAND_PREFIX)) return null;
+  const action = normalized.slice(WINDOW_MANAGEMENT_FINE_TUNE_COMMAND_PREFIX.length);
+  if (!action) return null;
+  if (!WINDOW_MANAGEMENT_FINE_TUNE_COMMAND_IDS.has(`${WINDOW_MANAGEMENT_FINE_TUNE_COMMAND_PREFIX}${action}`)) {
+    return null;
+  }
+  return action;
+}
+
+async function executeNativeWindowFineTune(commandId: string): Promise<boolean | null> {
+  if (process.platform !== 'darwin') return null;
+  const action = getNativeWindowFineTuneAction(commandId);
+  if (!action) return null;
+  if (nativeWindowFineTuneSupport === false) return null;
+
+  const fsNative = require('fs');
+  const helperPath = getNativeBinaryPath('window-adjust');
+  if (nativeWindowFineTuneSupport === null && !fsNative.existsSync(helperPath)) {
+    nativeWindowFineTuneSupport = false;
+    return null;
+  }
+
+  try {
+    const { execFile } = require('child_process');
+    const parsed = await new Promise<{ ok: boolean; error?: string } | null>((resolve) => {
+      execFile(
+        helperPath,
+        [action],
+        { encoding: 'utf-8', timeout: 420 },
+        (error: Error | null, stdout: string, _stderr: string) => {
+          const raw = String(stdout || '').trim();
+          if (!raw) {
+            if ((error as any)?.message?.includes('ENOENT')) {
+              nativeWindowFineTuneSupport = false;
+            }
+            resolve(null);
+            return;
+          }
+          try {
+            const payload = JSON.parse(raw);
+            if (typeof payload?.ok !== 'boolean') {
+              resolve(null);
+              return;
+            }
+            resolve({
+              ok: Boolean(payload.ok),
+              error: typeof payload?.error === 'string' ? payload.error : undefined,
+            });
+          } catch {
+            resolve(null);
+          }
+        }
+      );
+    });
+
+    if (!parsed) return null;
+    nativeWindowFineTuneSupport = true;
+    return parsed.ok;
+  } catch (error: any) {
+    if (String(error?.message || '').includes('ENOENT')) {
+      nativeWindowFineTuneSupport = false;
+    }
+    return null;
+  }
+}
+
+function computeWindowManagementFineTuneBounds(
+  commandId: string,
+  base: NodeWindowBounds,
+  area: { x: number; y: number; width: number; height: number }
+): NodeWindowBounds | null {
+  const normalized = String(commandId || '').trim();
+  const areaRight = area.x + area.width;
+  const areaBottom = area.y + area.height;
+  const stepX = Math.max(1, Math.round(base.width * WINDOW_MANAGEMENT_FINE_TUNE_RATIO));
+  const stepY = Math.max(1, Math.round(base.height * WINDOW_MANAGEMENT_FINE_TUNE_RATIO));
+  let next: NodeWindowBounds = { ...base };
+
+  switch (normalized) {
+    case 'system-window-management-increase-size-10':
+      next = {
+        x: base.x - Math.round(stepX / 2),
+        y: base.y - Math.round(stepY / 2),
+        width: base.width + stepX,
+        height: base.height + stepY,
+      };
+      break;
+    case 'system-window-management-decrease-size-10':
+      next = {
+        x: base.x + Math.round(stepX / 2),
+        y: base.y + Math.round(stepY / 2),
+        width: Math.max(WINDOW_MANAGEMENT_FINE_TUNE_MIN_WIDTH, base.width - stepX),
+        height: Math.max(WINDOW_MANAGEMENT_FINE_TUNE_MIN_HEIGHT, base.height - stepY),
+      };
+      break;
+    case 'system-window-management-increase-left-10': {
+      const rightEdge = base.x + base.width;
+      const leftEdge = base.x - stepX;
+      next = {
+        x: leftEdge,
+        y: base.y,
+        width: rightEdge - leftEdge,
+        height: base.height,
+      };
+      break;
+    }
+    case 'system-window-management-increase-right-10':
+      next = {
+        x: base.x,
+        y: base.y,
+        width: base.width + stepX,
+        height: base.height,
+      };
+      break;
+    case 'system-window-management-increase-top-10': {
+      const bottomEdge = base.y + base.height;
+      const topEdge = base.y - stepY;
+      next = {
+        x: base.x,
+        y: topEdge,
+        width: base.width,
+        height: bottomEdge - topEdge,
+      };
+      break;
+    }
+    case 'system-window-management-increase-bottom-10':
+      next = {
+        x: base.x,
+        y: base.y,
+        width: base.width,
+        height: base.height + stepY,
+      };
+      break;
+    case 'system-window-management-decrease-left-10': {
+      const rightEdge = base.x + base.width;
+      const width = Math.max(WINDOW_MANAGEMENT_FINE_TUNE_MIN_WIDTH, base.width - stepX);
+      next = {
+        x: rightEdge - width,
+        y: base.y,
+        width,
+        height: base.height,
+      };
+      break;
+    }
+    case 'system-window-management-decrease-right-10':
+      next = {
+        x: base.x,
+        y: base.y,
+        width: Math.max(WINDOW_MANAGEMENT_FINE_TUNE_MIN_WIDTH, base.width - stepX),
+        height: base.height,
+      };
+      break;
+    case 'system-window-management-decrease-top-10': {
+      const bottomEdge = base.y + base.height;
+      const height = Math.max(WINDOW_MANAGEMENT_FINE_TUNE_MIN_HEIGHT, base.height - stepY);
+      next = {
+        x: base.x,
+        y: bottomEdge - height,
+        width: base.width,
+        height,
+      };
+      break;
+    }
+    case 'system-window-management-decrease-bottom-10':
+      next = {
+        x: base.x,
+        y: base.y,
+        width: base.width,
+        height: Math.max(WINDOW_MANAGEMENT_FINE_TUNE_MIN_HEIGHT, base.height - stepY),
+      };
+      break;
+    case 'system-window-management-move-up-10':
+      next = { ...base, y: base.y - stepY };
+      break;
+    case 'system-window-management-move-down-10':
+      next = { ...base, y: base.y + stepY };
+      break;
+    case 'system-window-management-move-left-10':
+      next = { ...base, x: base.x - stepX };
+      break;
+    case 'system-window-management-move-right-10':
+      next = { ...base, x: base.x + stepX };
+      break;
+    default:
+      return null;
+  }
+
+  next.width = clampWindowManagementFineTuneValue(
+    Math.round(next.width),
+    WINDOW_MANAGEMENT_FINE_TUNE_MIN_WIDTH,
+    area.width
+  );
+  next.height = clampWindowManagementFineTuneValue(
+    Math.round(next.height),
+    WINDOW_MANAGEMENT_FINE_TUNE_MIN_HEIGHT,
+    area.height
+  );
+  next.x = clampWindowManagementFineTuneValue(Math.round(next.x), area.x, areaRight - next.width);
+  next.y = clampWindowManagementFineTuneValue(Math.round(next.y), area.y, areaBottom - next.height);
+  return next;
+}
+
+function scheduleWindowManagementFocusRestore(): void {
+  [50, 180, 360].forEach((delayMs) => {
+    setTimeout(() => {
+      if (isVisible) return;
+      void activateLastFrontmostApp();
+    }, delayMs);
+  });
+}
+
+async function executeWindowManagementFineTuneCommand(
+  commandId: string,
+  options?: { preferNative?: boolean }
+): Promise<boolean> {
+  const normalized = String(commandId || '').trim();
+  if (!WINDOW_MANAGEMENT_FINE_TUNE_COMMAND_IDS.has(normalized)) return false;
+
+  if (options?.preferNative) {
+    const nativeResult = await executeNativeWindowFineTune(normalized);
+    if (nativeResult === true) return true;
+  }
+
+  try {
+    await ensureWindowManagerAccess();
+    await captureWindowManagementTargetWindow();
+
+    let target: NodeWindowInfo | null = null;
+    if (windowManagementTargetWindowId) {
+      target = await getNodeWindowById(windowManagementTargetWindowId);
+    }
+    if (!target) {
+      try {
+        const activeRaw = await callWindowManagerWorker<any>('get-active-window');
+        const activeInfo = normalizeNodeWindowInfo(activeRaw);
+        if (activeInfo && !isSelfManagedWindow(activeInfo)) {
+          target = activeInfo;
+        }
+      } catch {}
+    }
+    if (!target) {
+      const snapshot = await getNodeSnapshot();
+      target = snapshot.target;
+    }
+    if (!target?.id || !target.bounds) {
+      return false;
+    }
+    windowManagementTargetWindowId = String(target.id);
+
+    let area = normalizeWindowManagementArea(windowManagementTargetWorkArea);
+    if (!area) {
+      const center = {
+        x: target.bounds.x + target.bounds.width / 2,
+        y: target.bounds.y + target.bounds.height / 2,
+      };
+      area = normalizeWindowManagementArea(screen.getDisplayNearestPoint(center)?.workArea);
+    }
+    if (!area) {
+      area = normalizeWindowManagementArea(
+        screen.getDisplayNearestPoint(screen.getCursorScreenPoint())?.workArea || screen.getPrimaryDisplay()?.workArea
+      );
+    }
+    if (!area) return false;
+    windowManagementTargetWorkArea = area;
+
+    const next = computeWindowManagementFineTuneBounds(normalized, target.bounds, area);
+    if (!next) return false;
+    return await queueWindowMutations([
+      {
+        id: String(target.id),
+        x: next.x,
+        y: next.y,
+        width: next.width,
+        height: next.height,
+      },
+    ]);
+  } catch (error) {
+    console.error('Failed to execute fine-tune window command:', error);
+    return false;
+  }
 }
 
 function enqueueWindowManagementMutation<T>(task: () => Promise<T> | T): Promise<T> {
@@ -5168,6 +5500,29 @@ async function runCommandById(commandId: string, source: 'launcher' | 'hotkey' =
     return await openLauncherAndRunSystemCommand('system-supercmd-whisper', {
       showWindow: source === 'launcher',
       mode: launcherMode === 'onboarding' ? 'onboarding' : 'default',
+    });
+  }
+  if (isWindowManagementFineTuneCommand(commandId)) {
+    const shouldPreserveFocusWhenHidden = source === 'launcher' || isVisible;
+    if (shouldPreserveFocusWhenHidden) {
+      captureFrontmostAppContext();
+    }
+    const success = await executeWindowManagementFineTuneCommand(commandId, {
+      preferNative: source === 'hotkey' && !isVisible,
+    });
+    if (success && source === 'launcher') {
+      setTimeout(() => hideWindow(), 25);
+    }
+    if (success && shouldPreserveFocusWhenHidden) {
+      scheduleWindowManagementFocusRestore();
+    }
+    if (success) {
+      return true;
+    }
+    return await openLauncherAndRunSystemCommand(commandId, {
+      showWindow: false,
+      mode: launcherMode === 'onboarding' ? 'onboarding' : 'default',
+      preserveFocusWhenHidden: true,
     });
   }
   if (isWindowManagementSystemCommand(commandId)) {
