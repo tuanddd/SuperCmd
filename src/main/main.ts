@@ -6934,7 +6934,7 @@ function openSettingsWindow(payload?: SettingsNavigationPayload): void {
       preload: path.join(__dirname, 'preload.js'),
     },
   });
-  registerCloseWindowShortcut(settingsWindow);
+  registerCloseWindowShortcut(settingsWindow, { closeOnEscape: true });
 
   const hash = buildSettingsHash(payload);
   loadWindowUrl(settingsWindow, hash);
