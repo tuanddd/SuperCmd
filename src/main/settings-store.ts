@@ -10,9 +10,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 export interface AISettings {
-  provider: 'openai' | 'anthropic' | 'ollama' | 'openai-compatible';
+  provider: 'openai' | 'anthropic' | 'gemini' | 'ollama' | 'openai-compatible';
   openaiApiKey: string;
   anthropicApiKey: string;
+  geminiApiKey: string;
   elevenlabsApiKey: string;
   supermemoryApiKey: string;
   supermemoryClient: string;
@@ -90,6 +91,7 @@ const DEFAULT_AI_SETTINGS: AISettings = {
   provider: 'openai',
   openaiApiKey: '',
   anthropicApiKey: '',
+  geminiApiKey: '',
   elevenlabsApiKey: '',
   supermemoryApiKey: '',
   supermemoryClient: '',
